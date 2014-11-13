@@ -11,7 +11,9 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
-
+.. class:: ParanoiaAgent()
+           
+   The core class for Paranoid objects.
 
 Indices and tables
 ==================
