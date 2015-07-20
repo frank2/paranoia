@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from paranoia.base import memory_region
-from paranoia.base.converters import *
+from paranoia.converters import *
 
 class NumericRegionError(memory_region.MemoryRegionError):
     pass

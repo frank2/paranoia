@@ -3,7 +3,7 @@
 import ctypes
 
 from paranoia.base import paranoia_agent
-from paranoia.base.converters import *
+from paranoia.converters import *
 
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
@@ -14,6 +14,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     BITSHIFT = 0
     VIRTUAL_BASE = 0
     ALIGNMENT = 8
+    ALIGN_BIT = 1
+    ALIGN_BYTE = 8
 
     def __init__(self, **kwargs):
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
