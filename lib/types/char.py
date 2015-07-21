@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from ..base import numeric_region
+from paranoia.base import numeric_region
 from . import byte
 
 class CharError(numeric_region.NumericRegionError):
