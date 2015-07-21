@@ -7,11 +7,11 @@ from . import word
 from . import dword
 from . import qword
 from . import wchar
-from .. import concat_modules
+from paranoia import concat_modules
 
 __all__ = concat_modules(__name__
                          ,locals()
-                         ,['.']
+                         ,['.', 'concat_modules']
                          ,[bitfield
                            ,byte
                            ,char
