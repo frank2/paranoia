@@ -6,6 +6,7 @@ from . import char
 from . import word
 from . import dword
 from . import qword
+from . import oword
 from . import wchar
 from paranoia import concat_modules
 
@@ -18,4 +19,5 @@ __all__ = concat_modules(__name__
                            ,word
                            ,dword
                            ,qword
+                           ,oword
                            ,wchar])
