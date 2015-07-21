@@ -28,7 +28,7 @@ class Structure(d_list.List):
 
         for struct_pair in declarations:
             if not len(struct_pair) == 2 or not isinstance(struct_pair[0], basestring) or not isinstance(struct_pair[1], declaration.Declaration):
-                raise StructureError('struct_declaration element must be a pair consisting of a string and a DataDeclaration.')
+                raise StructureError('struct_declaration element must be a pair consisting of a string and a Declaration.')
             
             name, declaration_obj = struct_pair
             index = len(self.declarations)

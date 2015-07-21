@@ -36,3 +36,9 @@ class Declaration:
             return self.base_class.static_bitspan()
 
         return self.args['bitspan']
+
+    def alignment(self):
+        if not self.args.has_key('alignment'):
+            return self.base_class.static_alignment()
+
+        return self.args['alignment']

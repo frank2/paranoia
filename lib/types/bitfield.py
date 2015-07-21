@@ -2,8 +2,12 @@
 
 from paranoia.base import numeric_region
 
-# technically NumericRegions -are- bitfields, so this is just syntactic sugar.
-# though the way they're parsed means we need to set it to BIG_ENDIAN
 class Bitfield(numeric_region.NumericRegion):
-    ENDIANNESS = numeric_region.NumericRegion.BIG_ENDIAN
     ALIGNMENT = numeric_region.NumericRegion.ALIGN_BIT
+
+    #def write_bits(self, bits, bit_offset=0):
+    #    print bits
+    #    return super(numeric_region.NumericRegion, self).write_bits(bits[::-1], bit_offset)
+    
+    #def read_bits_from_bytes(self, bit_length, bit_offset=0):
+    #    return super(numeric_region.NumericRegion, self).read_bits_from_bytes(bit_length, bit_offset)[::-1]

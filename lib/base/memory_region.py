@@ -33,33 +33,54 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if self.memory_base is None:
             raise MemoryRegionError('memory_base cannot be None')
 
-        if self.bitshift > self.alignment or self.bitshift < 0:
-            raise MemoryRegionError('bitshift must be within the range of 0-%d noninclusive' % self.alignment)
+        if self.bitshift > 8 or self.bitshift < 0:
+            raise MemoryRegionError('bitshift must be within the range of 0-8 noninclusive')
 
     def read_bytes(self, byte_length, byte_offset=0):
         if (byte_length+byte_offset)*8 > align(self.bitspan, 8): 
-            raise MemoryRegionError('byte length and offset exceed aligned bitspan')
+            raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan, 8)))
 
         try:
             return map(ord, ctypes.string_at(self.memory_base+byte_offset, byte_length))
         except:
             raise MemoryRegionError('raw memory access failed')
 
-    def read_bits_from_bytes(self, bit_length, bit_offset=0):
-        # true_offset represents where in the first byte to start reading bits
-        true_offset = self.bitshift + bit_offset
-
+    def read_bytelist_for_bits(self, bit_length, bit_offset=0):
         if bit_length + bit_offset > self.bitspan:
             raise MemoryRegionError('bit length and offset exceed bitspan')
+
+        # true_offset represents where in the first byte to start reading bits
+        true_offset = self.bitshift + bit_offset
 
         # get the number of bytes necessary to grab our contextual bits
         byte_length = align(bit_length+(true_offset % 8), 8)/8
 
         # convert the bytes into a string of bits
-        converted_bytes = ''.join(map('{0:08b}'.format, self.read_bytes(byte_length, true_offset/8)))
+        return self.read_bytes(byte_length, true_offset/8)
 
+    def read_bitlist_from_bytes(self, bit_length, bit_offset=0):
+        if bit_length + bit_offset > self.bitspan:
+            raise MemoryRegionError('bit length and offset exceed bitspan')
+
+        unconverted_bytes = self.read_bytelist_for_bits(bit_length, bit_offset)
+        return ''.join(map('{0:08b}'.format, unconverted_bytes))
+
+    def read_bits_from_bytes(self, bit_length, bit_offset=0):
         # take only the contextual bits based on the bit_length
+        if bit_length + bit_offset > self.bitspan:
+            raise MemoryRegionError('bit length and offset exceed bitspan')
+
+        # true_offset represents where in the first byte to start reading bits
+        true_offset = self.bitshift + bit_offset
+
+        converted_bytes = self.read_bitlist_from_bytes(bit_length, bit_offset)
         return map(int, converted_bytes)[true_offset:bit_length+true_offset]
+
+    def read_bits(self, bit_length=None, bit_offset=0):
+        if not bit_length:
+            bit_length = self.bitspan
+            
+        return self.read_bits_from_bytes(bit_length, bit_offset)
 
     def read_bytes_from_bits(self, bit_length, bit_offset=0):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset))
@@ -85,16 +106,28 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         byte_end = true_terminus/8
 
         # value represents the number of bits which overwrite the underlying byte
+
+        if byte_start == byte_end:
+            single_shift = ((8 - len(bit_list)) - true_offset)
+            value_mask = ((2 ** len(bit_list)) - 1) << single_shift
+            underlying_mask = 0xFF ^ value_mask
+            underlying_value = self.read_bytes(1, byte_start)[0]
+            bit_value = bitlist_to_numeric(bit_list) << single_shift
+            mask_result = underlying_value & underlying_mask | bit_value
+
+            self.write_bytes([mask_result], byte_start)
+            return
+
         front_remainder = alignment_delta(true_offset, 8)
 
         if front_remainder:
             front_bits = bit_list[:front_remainder]
             front_byte_mask = (0xFF ^ (2 ** front_remainder) - 1)
-            front_byte_value = self.read_bytes(1, byte_end)[0]
+            front_byte_value = self.read_bytes(1, byte_start)[0]
             front_bit_value = bitlist_to_numeric(front_bits)
             mask_result = front_byte_value & front_byte_mask | front_bit_value
 
-            self.write_bytes([mask_result], byte_start)
+            self.write_bytes([mask_result], byte_start)            
             byte_start += 1
 
         # value represents the number of bits which overwrite the underlying byte
@@ -106,7 +139,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             back_byte_value = self.read_bytes(1, byte_end)[0]
             back_bit_value = bitlist_to_numeric(back_bits)
             mask_result = back_byte_value & back_byte_mask | (back_bit_value << (8 - back_remainder))
-
+            
             self.write_bytes([mask_result], byte_end)
 
         bytebound_list = bit_list[front_remainder:(len(bit_list) - back_remainder)]
@@ -125,6 +158,10 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     @classmethod
     def static_bitspan(cls):
         return cls.BITSPAN
+
+    @classmethod
+    def static_alignment(cls):
+        return cls.ALIGNMENT
 
     @classmethod
     def static_declaration(cls, **kwargs):

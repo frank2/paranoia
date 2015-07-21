@@ -2,6 +2,8 @@
 
 from paranoia.base import memory_region, paranoia_agent
 from paranoia.base.abstract import declaration
+from paranoia.converters import *
+from paranoia.types import bitfield
 
 class ListError(paranoia_agent.ParanoiaError):
     pass
@@ -16,7 +18,7 @@ class List(memory_region.MemoryRegion):
             self.declarations = list()
 
         if not isinstance(self.declarations, list):
-            raise ListError('declarations must be a list of DataDeclaration objects')
+            raise ListError('declarations must be a list of Declaration objects')
 
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
 
@@ -43,6 +45,7 @@ class List(memory_region.MemoryRegion):
 
         for i in range(start_from, len(self.declarations)):
             bitspan = self.declarations[i].bitspan()
+            alignment = self.declarations[i].alignment()
             list_bitspan += bitspan
 
             offset_dict = dict()
@@ -52,18 +55,16 @@ class List(memory_region.MemoryRegion):
                 offset_dict['memory_base'] = self.memory_base
                 offset_dict['bitshift'] = self.bitshift
             else:
-                # FIXME this does not accomodate for the object's bit alignment
-                
                 previous_offset = self.declaration_offsets[i-1]
                 previous_shift = previous_offset['bitshift']
                 previous_span = previous_offset['bitspan']
                 previous_base = previous_offset['memory_base']
 
-                shift_and_span = previous_shift + previous_span
+                shift_and_span = align(previous_shift + previous_span, alignment)
 
-                new_shift = shift_and_span % 8
                 new_base = previous_base + (shift_and_span / 8)
-
+                new_shift = shift_and_span % 8
+                
                 offset_dict['bitshift'] = new_shift
                 offset_dict['memory_base'] = new_base
 
@@ -107,13 +108,13 @@ class List(memory_region.MemoryRegion):
 
     def instantiate(self, index):
         if abs(index) > len(self.declarations):
-            raise DataListError('index out of range')
+            raise ListError('index out of range')
 
         if index < 0:
             index += len(self.declarations)
 
         if not self.declaration_offsets.has_key(index):
-            raise DataListError('offset for index not parsed')
+            raise ListError('offset for index not parsed')
 
         memory_base = self.declaration_offsets[index]['memory_base']
         bitshift = self.declaration_offsets[index]['bitshift']
@@ -122,16 +123,17 @@ class List(memory_region.MemoryRegion):
 
         return instance
 
-    # TODO def __getitem__
-
+    def __getitem__(self, index):
+        return self.instantiate(index)
+    
     @classmethod
     def static_bitspan(cls):
         if not cls.DECLARATIONS:
-            raise DataListError('no static declarations to parse bitspan from')
+            raise ListError('no static declarations to parse bitspan from')
 
         # FIXME this doesn't accomodate for odd bitfield alignment.
         # FIXME see calculate_offsets.
-        return sum(map(DataDeclaration.bitspan, cls.DECLARATIONS))
+        return sum(map(declaration.Declaration.bitspan, cls.DECLARATIONS))
 
     @classmethod
     def static_declaration(cls, **kwargs):
@@ -139,7 +141,7 @@ class List(memory_region.MemoryRegion):
 
         super_class = super(List, cls).static_declaration(**kwargs)
 
-        class StaticDataList(super_class):
+        class StaticList(super_class):
             DECLARATIONS = kwargs['declarations']
 
-        return StaticDataList
+        return StaticList

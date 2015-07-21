@@ -266,7 +266,7 @@ def test_Array():
 def test_Structure():
     print '[test_Structure]'
 
-    array_class = Array.static_declaration(base_class=Byte, elements=20)
+    array_class = Array.static_declaration(base_class=Byte, elements=21)
 
     nested_structure = Structure.simple(
         [('dword_obj', Dword)
@@ -278,6 +278,8 @@ def test_Structure():
          ,('word_obj', Word, {'value': 0x505})
          ,('dword_obj', Dword)
          ,('qword_obj', Qword)
+         ,('bitfield_1', Bitfield, {'bitspan': 2})
+         ,('bitfield_2', Bitfield, {'bitspan': 4})
          ,('array_obj', array_class)
          ,('nested_obj', nested_structure)])
 
@@ -295,6 +297,34 @@ def test_Structure():
     nested_word = structure_instance.nested_obj.word_obj
     nested_word.set_value(0x505)
     assert structure_instance.nested_obj.word_obj.get_value() == 0x505
+
+    qword_obj = structure_instance.qword_obj
+    qword_obj.set_value(0x554e4441554e4441)
+    array_obj = structure_instance.array_obj
+    array_obj[0].set_value(0x44)
+    bitfield_1 = structure_instance.bitfield_1
+    bitfield_2 = structure_instance.bitfield_2
+    bitfield_1.set_value(0)
+    bitfield_2.set_value(0)
+    assert structure_instance.qword_obj.get_value() == 0x554e4441554e4441
+    assert structure_instance.array_obj[0].get_value() == 0x44
+    assert structure_instance.bitfield_1.bitshift == 0
+    assert structure_instance.bitfield_2.bitshift == 2
+    assert structure_instance.bitfield_1.memory_base == structure_instance.bitfield_2.memory_base
+    
+    bitfield_1.set_value(1)
+    assert structure_instance.bitfield_1.get_value() == 1
+    assert structure_instance.bitfield_2.get_value() == 0
+
+    bitfield_1.set_value(4)
+    assert structure_instance.bitfield_1.get_value() == 0
+
+    bitfield_1.set_value(2)
+    bitfield_2.set_value(10)
+    assert structure_instance.bitfield_1.get_value() == 2
+    assert structure_instance.bitfield_2.get_value() == 10
+    assert structure_instance.qword_obj.get_value() == 0x554e4441554e4441
+    assert structure_instance.array_obj[0].get_value() == 0x44
 
 def main(*args):
     test_Allocator()

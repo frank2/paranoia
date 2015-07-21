@@ -64,8 +64,8 @@ class Array(d_list.List):
 
         super_class = super(Array, cls).static_declaration(**kwargs)
 
-        class StaticDataArray(super_class):
+        class StaticArray(super_class):
             BASE_CLASS = kwargs['base_class']
             ELEMENTS = kwargs['elements']
 
-        return StaticDataArray
+        return StaticArray
