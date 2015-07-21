@@ -7,8 +7,7 @@ import os
 import sys
 
 from paranoia import *
-
-list = __builtins__.list
+list = __builtins__.list # paranoia clobbers list on import of everything
 
 ALLOCATOR = Allocator()
 
