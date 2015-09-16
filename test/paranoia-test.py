@@ -251,6 +251,14 @@ def test_Array():
     assert len(byte_array.declarations) == 15
     print '[Array.parse_elements: PASS]'
 
+    class SizeTestClass(Array):
+        BASE_CLASS = Byte
+
+    StaticSizeClass = SizeTestClass.static_size(20)
+    byte_array = StaticSizeClass(memory_base=c_address)
+    assert len(byte_array.declarations) == 20
+    assert byte_array.instantiate(5).get_value() == 0x50
+
     ALLOCATOR.deallocate(c_address)
 
 def test_Structure():
