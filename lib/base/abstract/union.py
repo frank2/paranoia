@@ -33,7 +33,7 @@ class Union(structure.Structure):
         if attr == 'union_map':
             attr = 'struct_map'
 
-        return super(Structure, self).__getattr__(attr)
+        return structure.Structure.__getattr__(self, attr)
 
     @classmethod
     def static_bitspan(cls):
@@ -53,18 +53,17 @@ class Union(structure.Structure):
             if not isinstance(name, basestring):
                 raise UnionError('first argument of the declaration must be a string')
             
-            if issubclass(declare, memory_region.MemoryRegion):
-                declare = declaration.Declaration(base_class=declare)
-            elif getattr(declare, '__iter__', None) and len(declare) == 2:
+            if getattr(declare, '__iter__', None) and len(declare) == 2:
                 declare = declaration.Declaration(base_class=declare[0]
                                                   ,args=declare[1])
-            elif not isinstance(declare, declaration.Declaration)::
+            elif issubclass(declare, memory_region.MemoryRegion):
+                declare = declaration.Declaration(base_class=declare)
+            elif not isinstance(declare, declaration.Declaration):
                 raise UnionError('second argument of the declaration must be either a declaration, a type or a tuple containing a type and arguments')
                 
             new_union_declaration[name] = declare
 
         class SimplifiedUnion(cls):
-            FIELDS = zip(new_union_declarations.keys()
-                         ,map(list, new_union_declaration.items()))
+            FIELDS = new_union_declaration.items()[:]
 
         return SimplifiedUnion
