@@ -29,12 +29,6 @@ class Union(structure.Structure):
 
         self.bitspan = longest_object
 
-    def __getattr__(self, attr):
-        if attr == 'union_map':
-            attr = 'struct_map'
-
-        return structure.Structure.__getattr__(self, attr)
-
     @classmethod
     def static_bitspan(cls):
         return max(map(lambda x: x[1].bitspan(), cls.FIELDS))
