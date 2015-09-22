@@ -61,19 +61,64 @@ class Mapping(d_list.List):
             self.field_map[name] = index
 
     def __getattr__(self, attr):
-        if not self.__dict__.has_key('field_map') and not self.__dict__.has_key(attr):
+        if not self.__dict__.has_key('field_map') and not self.__dict__.has_key('anon_map') and not self.__dict__.has_key(attr):
             raise AttributeError(attr)
-        elif not self.__dict__.has_key('field_map'):
-            return self.__dict__[attr]
 
         field_map = self.__dict__['field_map']
+        anon_map = self.__dict__['anon_map']
 
         if field_map.has_key(attr):
             index = field_map[attr]
             return self.instantiate(index)
+        elif anon_map.has_key(attr):
+            mapping = anon_map[attr]
+
+            if not field_map.has_key(mapping):
+                raise AttributeError(mapping)
+            
+            return getattr(field_map[mapping], attr)
+        elif self.__dict__.has_key(attr):
+            return self.__dict__[attr]
         else:
             raise AttributeError(attr)
 
     @classmethod
     def static_bitspan(cls):
         return sum(map(lambda x: x[1].bitspan(), cls.FIELDS))
+
+    @classmethod
+    def simple(cls, declarations):
+        new_mapping_declaration = list()
+
+        if not getattr(declarations, '__iter__', None):
+            raise StructureError('declarations must be a sequence of names, a base class and optional arguments')
+
+        if len(declarations) == 0:
+            raise StructureError('empty declaration list given')
+
+        for declaration_obj in declarations:
+            if not len(declaration_obj) == 2 and not len(declaration_obj) == 3:
+                raise StructureError('simple declaration item has invalid arguments')
+
+            if not isinstance(declaration_obj[0], basestring) and not declaration_obj[0] == None:
+                raise StructureError('first argument of the declaration must be a string or None')
+
+            if not issubclass(declaration_obj[1], memory_region.MemoryRegion):
+                raise StructureError('second argument must be a base class implementing MemoryRegion')
+
+            if len(declaration_obj) == 3 and not isinstance(declaration_obj[2], dict):
+                raise StructureError('optional third argument must be a dictionary of arguments')
+                
+            if not len(declaration_obj) == 3:
+                args = dict()
+            else:
+                args = declaration_obj[2]
+
+            new_mapping_declaration.append([declaration_obj[0]
+                                            ,declaration.Declaration(base_class=declaration_obj[1]
+                                                                     ,args=args)])
+        
+        class SimplifiedMapping(cls):
+            FIELDS = new_struct_declaration
+
+        return SimplifiedMapping    

@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
-from . import structure
 from . import declaration
 from .. import memory_region
+from paranoia.base.abstract import mapping
 
-class UnionError(structure.StructureError):
+class UnionError(mapping.MappingError):
     pass
 
-class Union(structure.Structure):
+class Union(mapping.Mapping):
     def calculate_offsets(self, start_from=0):
         longest_object = 0
         self.declaration_offsets = dict()
@@ -32,32 +32,3 @@ class Union(structure.Structure):
     @classmethod
     def static_bitspan(cls):
         return max(map(lambda x: x[1].bitspan(), cls.FIELDS))
-
-    @classmethod
-    def simple(cls, declarations):
-        new_union_declaration = dict()
-
-        if not isinstance(declarations, dict):
-            raise UnionError('union declaration must be a dictionary of names mapping to either a declaration, a type or a tuple of type and initialization arguments')
-
-        if len(declarations) == 0:
-            raise UnionError('empty declaration dict given')
-
-        for name, declare in declarations.items():
-            if not isinstance(name, basestring):
-                raise UnionError('first argument of the declaration must be a string')
-            
-            if getattr(declare, '__iter__', None) and len(declare) == 2:
-                declare = declaration.Declaration(base_class=declare[0]
-                                                  ,args=declare[1])
-            elif issubclass(declare, memory_region.MemoryRegion):
-                declare = declaration.Declaration(base_class=declare)
-            elif not isinstance(declare, declaration.Declaration):
-                raise UnionError('second argument of the declaration must be either a declaration, a type or a tuple containing a type and arguments')
-                
-            new_union_declaration[name] = declare
-
-        class SimplifiedUnion(cls):
-            FIELDS = new_union_declaration.items()[:]
-
-        return SimplifiedUnion
