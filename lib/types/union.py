@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from . import declaration
-from .. import memory_region
 from paranoia.base.abstract import mapping
 
 class UnionError(mapping.MappingError):

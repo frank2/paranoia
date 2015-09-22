@@ -28,10 +28,10 @@ class Mapping(d_list.List):
         anonymous_fields = 0
 
         for pair in fields:
-            if not len(pair) == 2 or not isinstance(pair[0], basestring) or not isinstance(struct_pair[1], declaration.Declaration):
+            if not len(pair) == 2 and not isinstance(pair[0], basestring) and not pair[0] == None and not isinstance(pair[1], declaration.Declaration):
                 raise MappingError('field_declaration element must be a pair consisting of a string or None paired with a Declaration.')
             
-            name, declaration_obj = struct_pair
+            name, declaration_obj = pair
 
             if name == None:
                 if not issubclass(declaration_obj.base_class, Mapping):
@@ -39,7 +39,7 @@ class Mapping(d_list.List):
                 
                 name = '__anon_field%04d' % anonymous_fields
                 anonymous_fields += 1
-                found_fields = declaration_obj.args.get('fields', None) or declaration_obj.BASE_CLASS.FIELDS
+                found_fields = declaration_obj.args.get('fields', None) or declaration_obj.base_class.FIELDS
 
                 if not found_fields:
                     raise MappingError('no fields in declaration object')
@@ -76,7 +76,8 @@ class Mapping(d_list.List):
             if not field_map.has_key(mapping):
                 raise AttributeError(mapping)
             
-            return getattr(field_map[mapping], attr)
+            index = field_map[mapping]
+            return getattr(self.instantiate(index), attr)
         elif self.__dict__.has_key(attr):
             return self.__dict__[attr]
         else:
@@ -91,23 +92,23 @@ class Mapping(d_list.List):
         new_mapping_declaration = list()
 
         if not getattr(declarations, '__iter__', None):
-            raise StructureError('declarations must be a sequence of names, a base class and optional arguments')
+            raise MappingError('declarations must be a sequence of names, a base class and optional arguments')
 
         if len(declarations) == 0:
-            raise StructureError('empty declaration list given')
+            raise MappingError('empty declaration list given')
 
         for declaration_obj in declarations:
             if not len(declaration_obj) == 2 and not len(declaration_obj) == 3:
-                raise StructureError('simple declaration item has invalid arguments')
+                raise MappingError('simple declaration item has invalid arguments')
 
             if not isinstance(declaration_obj[0], basestring) and not declaration_obj[0] == None:
-                raise StructureError('first argument of the declaration must be a string or None')
+                raise MappingError('first argument of the declaration must be a string or None')
 
             if not issubclass(declaration_obj[1], memory_region.MemoryRegion):
-                raise StructureError('second argument must be a base class implementing MemoryRegion')
+                raise MappingError('second argument must be a base class implementing MemoryRegion')
 
             if len(declaration_obj) == 3 and not isinstance(declaration_obj[2], dict):
-                raise StructureError('optional third argument must be a dictionary of arguments')
+                raise MappingError('optional third argument must be a dictionary of arguments')
                 
             if not len(declaration_obj) == 3:
                 args = dict()
@@ -119,6 +120,6 @@ class Mapping(d_list.List):
                                                                      ,args=args)])
         
         class SimplifiedMapping(cls):
-            FIELDS = new_struct_declaration
+            FIELDS = new_mapping_declaration[:]
 
         return SimplifiedMapping    
