@@ -343,6 +343,12 @@ def test_Structure():
     assert structure_instance.array_obj[0].get_value() == 0x44
 
     anon_dword = structure_instance.anon_dword_1
+    anon_dword.set_value(0x42)
+    assert structure_instance.anon_dword_1.get_value() == 0x42
+
+    anon_dword = structure_instance.anon_dword_2
+    anon_dword.set_value(0x42)
+    assert structure_instance.anon_dword_2.get_value() == 0x42
 
     print '[Structure: PASS]'
 
@@ -351,19 +357,19 @@ def test_Union():
 
     array_class = Array.static_declaration(base_class=Byte, elements=7)
 
-    nested_structure = Structure.simple(
-        [('dword_obj', Dword)
-         ,('word_obj', Word)
-         ,('byte_obj', Byte)])
+    nested_structure = Structure.simple([
+        ('dword_obj', Dword)
+        ,('word_obj', Word)
+        ,('byte_obj', Byte)])
 
     union_class = Union.simple([
-        ('array', array_class),
-        ('structure', nested_structure),
-        ('qword', Qword),
-        ('dword', Dword),
-        ('word', Word),
-        ('byte', Byte),
-        ('bitfield', Bitfield, {'bitspan': 8*8+1})])
+        ('array', array_class)
+        ,('structure', nested_structure)
+        ,('qword', Qword)
+        ,('dword', Dword)
+        ,('word', Word)
+        ,('byte', Byte)
+        ,('bitfield', Bitfield, {'bitspan': 8*8+1})])
 
     union_size = union_class.static_bitspan()
     assert union_size == 65
