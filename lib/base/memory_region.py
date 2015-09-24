@@ -9,24 +9,30 @@ from paranoia.converters import *
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
 
-class MemoryRegion(allocator.Allocator):
+class MemoryRegion(paranoia_agent.ParanoiaAgent):
     BITSPAN = None
     MEMORY_BASE = None
     AUTO_ALLOCATE = True
+    PARENT_REGION = None
+    ALLOCATOR_CLASS = allocator.Allocator
     BITSHIFT = 0
     ALIGNMENT = 8
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
 
     def __init__(self, **kwargs):
-        allocator.Allocator.__init__(self, **kwargs)
-        
+        paranoia_agent.ParanoiaAgent.__init__(self, **kwargs)
+
+        self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
+        self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
         self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
         self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
 
+        if not issubclass(self.allocator_class, allocator.Allocator):
+            raise MemoryRegionError('allocator must implement allocator.Allocator')
         if self.alignment is None or self.alignment < 0:
             raise MemoryRegionError('alignment cannot be None or less than 0')
 
@@ -36,8 +42,26 @@ class MemoryRegion(allocator.Allocator):
         if self.bitshift > 8 or self.bitshift < 0:
             raise MemoryRegionError('bitshift must be within the range of 0-8 noninclusive')
 
+        if self.parent_region is None:
+            self.allocator = self.allocator_class(**kwargs)
+        elif not self.allocator_class == self.parent_region.allocator_class:
+            self.allocator = self.parent_region.allocator_class(**kwargs)
+        else:
+            parent_region = self.parent_region
+
+            while not parent_region is None:
+                if not self.allocator_class == parent_region.allocator_class:
+                    break
+
+                parent_region = parent_region.parent_region
+
+            if parent_region is None:
+                self.allocator = self.allocator_class(**kwargs)
+            else:
+                self.allocator = parent_region.allocator_class(**kwargs)
+
         if self.memory_base is None and self.auto_allocate:
-            self.memory_base = self.allocate(self.shifted_bytespan())
+            self.memory_base = self.allocator.allocate(self.shifted_bytespan())
         elif self.memory_base is None:
             raise MemoryRegionError('memory_base cannot be None when allocate is False')
 
@@ -165,6 +189,14 @@ class MemoryRegion(allocator.Allocator):
 
     def write_bytes_from_bits(self, bit_list, byte_offset=0):
         self.write_bytes(bitlist_to_bytelist(bit_list), byte_offset)
+
+    def root_parent(self):
+        root_parent = self
+
+        while not root_parent.parent_region == None:
+            root_parent = root_parent.parent_region
+
+        return root_parent
 
     def __hash__(self):
         return hash('%X/%d/%d' % (self.memory_base, self.bitspan, self.bitshift))
