@@ -9,6 +9,14 @@ from paranoia.converters import *
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
 
+def sizeof(memory_region):
+    if issubclass(memory_region, MemoryRegion):
+        return memory_region.static_bytespan()
+    elif isinstance(memory_region, MemoryRegion):
+        return memory_region.bytespan()
+    else:
+        raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
+    
 class MemoryRegion(paranoia_agent.ParanoiaAgent):
     BITSPAN = None
     MEMORY_BASE = None

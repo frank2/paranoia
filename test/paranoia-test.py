@@ -400,6 +400,12 @@ def test_Pointer():
     qword_obj = Qword()
     qword_obj.set_value(0x6464646464646464)
 
+    dword_array = Array(base_class=Dword
+                        ,elements=20)
+
+    dword_array[10].set_value(0x42424242)
+    dword_array[0].set_value(0x21212121)
+
     if dword_obj.memory_base < 0xFFFFFFFF:
         pointer_class = Pointer32
     else:
@@ -414,14 +420,15 @@ def test_Pointer():
     pointer_64.set_value(qword_obj.memory_base)
     assert pointer_64.deref().get_value() == 0x6464646464646464
 
-    pointer_32.offset_base = dword_obj.memory_base - 0x20
-    pointer_32.set_value(0x20)
+    array_pointer_front = pointer_class.cast(Dword)(value=dword_array.memory_base)
+    array_pointer_middle = array_pointer_front + 10
 
-    pointer_64.offset_base = qword_obj.memory_base - 0x40
-    pointer_64.set_value(0x40)
-
-    assert pointer_32.deref().get_value() == 0x32323232
-    assert pointer_64.deref().get_value() == 0x6464646464646464
+    assert array_pointer_front.deref().get_value() == 0x21212121
+    assert array_pointer_middle.deref().get_value() == 0x42424242
+    assert (array_pointer_front+10).deref().get_value() == 0x42424242
+    assert (array_pointer_middle-10).deref().get_value() == 0x21212121
+    assert array_pointer_front[10].get_value() == 0x42424242
+    assert array_pointer_middle[-10].get_value() == 0x21212121
 
     print '[Pointer: PASS]'
 

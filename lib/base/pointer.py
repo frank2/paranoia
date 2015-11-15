@@ -7,8 +7,8 @@ class PointerError(numeric_region.NumericRegionError):
     pass
 
 class Pointer(numeric_region.NumericRegion):
+    # TODO c-style pointer math
     CASTING_CLASS = None
-    OFFSET_BASE = None
 
     def __init__(self, **kwargs):
         self.casting_class = kwargs.setdefault('casting_class', self.CASTING_CLASS)
@@ -16,8 +16,6 @@ class Pointer(numeric_region.NumericRegion):
         if self.casting_class is None:
             raise PointerError('no casting class given to pointer')
         
-        self.offset_base = kwargs.setdefault('offset_base', self.OFFSET_BASE)
-
         if not issubclass(self.casting_class, memory_region.MemoryRegion):
             raise PointerError('casting class must implement MemoryRegion')
         
@@ -26,9 +24,6 @@ class Pointer(numeric_region.NumericRegion):
     def deref(self, casting_class=None):
         address = self.get_value()
         
-        if not self.offset_base == None:
-            address += self.offset_base
-
         if casting_class is None:
             casting_class = self.casting_class
 
@@ -37,6 +32,55 @@ class Pointer(numeric_region.NumericRegion):
         
         return casting_class(memory_base=address)
 
+    def __add__(self, addend):
+        if self.casting_class is None:
+            raise PointerError('pointer arithmetic not possible without cast')
+
+        value = self.get_value()
+        value += memory_region.sizeof(self.casting_class) * int(addend)
+
+        return self.__class__(value=value, casting_class=self.casting_class)
+
+    def __iadd__(self, addend):
+        if self.casting_class is None:
+            raise PointerError('pointer arithmetic not possible without cast')
+
+        value = self.get_value()
+        value += memory_region.sizeof(self.casting_class) * int(addend)
+        self.set_value(value)
+
+    def __radd__(self, addend):
+        return self + int(addend)
+    
+    def __sub__(self, addend):
+        if self.casting_class is None:
+            raise PointerError('pointer arithmetic not possible without cast')
+
+        value = self.get_value()
+        value -= memory_region.sizeof(self.casting_class) * int(addend)
+
+        return self.__class__(value=value, casting_class=self.casting_class)
+
+    def __isub__(self, addend):
+        if self.casting_class is None:
+            raise PointerError('pointer arithmetic not possible without cast')
+
+        value = self.get_value()
+        value -= memory_region.sizeof(self.casting_class) * int(addend)
+        self.set_value(value)
+
+    def __rsub__(self, addend):
+        if self.casting_class is None:
+            raise PointerError('pointer arithmetic not possible without cast')
+
+        value = memory_region.sizeof(self.casting_class) * int(addend)
+        value -= self.get_value()
+
+        return self.__class__(value=value, casting_class=self.casting_class)
+
+    def __getitem__(self, index):
+        return (self + index).deref()
+    
     @classmethod
     def cast(cls, casting_class):
         class CastedPointer(cls):
