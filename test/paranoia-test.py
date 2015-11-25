@@ -28,16 +28,13 @@ def test_Allocator():
 def test_MemoryRegion():
     print '[test_MemoryRegion]'
 
-    # allocate a string
-    c_address = ALLOCATOR.allocate_string('MemoryRegion test')
-    c_string = ALLOCATOR.address_map[c_address]
-    
-    # initialize the region
-    region = MemoryRegion(memory_base=c_address, bitspan=len(c_string)*8)
+    init_string = 'MemoryRegion test'
+    region = MemoryRegion(string_data=init_string)
 
     # run basic assertions
-    assert region.read_bytes(len(c_string)) == map(ord, c_string.raw)
-    assert region.read_bytes(len(c_string)-1, 1) == map(ord, c_string.raw[1:])
+    assert region.bitspan == len(init_string)*8
+    assert region.read_bytes(len(init_string)) == map(ord, init_string)
+    assert region.read_bytes(len(init_string)-1, 1) == map(ord, init_string[1:])
     print '[MemoryRegion.read_bytes: PASS]'
 
     assert region.read_bits_from_bytes(4) == [0, 1, 0, 0]
@@ -63,7 +60,7 @@ def test_MemoryRegion():
     assert region.read_bits_from_bytes(12, 6) == [1] * 12
     print '[MemoryRegion.write_bits: PASS]'
 
-    misaligned = MemoryRegion(memory_base=c_address, bitspan=12)
+    misaligned = MemoryRegion(memory_base=region.memory_base, bitspan=12)
     assert misaligned.bitspan == 12
     assert misaligned.bytespan() == 2
     misaligned.bitshift = 5
@@ -71,8 +68,6 @@ def test_MemoryRegion():
     assert misaligned.shifted_bitspan() == 17
     assert misaligned.shifted_bytespan() == 3
     print '[MemoryRegion.alignment: PASS]'
-
-    ALLOCATOR.deallocate(c_address)
 
 def test_NumericRegion():
     print '[test_NumericRegion]'
@@ -390,6 +385,8 @@ def test_Union():
     union_instance.structure.byte_obj.set_value(0x42)
     assert union_instance.array[6].get_value() == 0x42
     assert union_instance.bitfield.get_value() == 0x8400840000008400
+
+    print '[Union: PASS]'
 
 def test_Pointer():
     print '[test_Pointer]'

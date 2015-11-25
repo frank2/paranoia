@@ -24,6 +24,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     PARENT_REGION = None
     ALLOCATOR_CLASS = allocator.Allocator
     ALLOCATOR = None
+    STRING_DATA = None
     BITSHIFT = 0
     ALIGNMENT = 8
     ALIGN_BIT = 1
@@ -40,6 +41,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
         self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
+        
+        string_data = kwargs.setdefault('string_data', self.STRING_DATA)
+
+        if not string_data is None and not isinstance(string_data, basestring):
+            raise MemoryRegionError('string_data must be a string')
+
+        if self.bitspan is None and not string_data is None:
+            self.bitspan = len(string_data)*8
 
         if not issubclass(self.allocator_class, allocator.Allocator):
             raise MemoryRegionError('allocator class must implement allocator.Allocator')
@@ -79,7 +88,10 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if self.memory_base is None and self.auto_allocate:
             self.memory_base = self.allocator.allocate(self.shifted_bytespan())
         elif self.memory_base is None:
-            raise MemoryRegionError('memory_base cannot be None when allocate is False')
+            raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and string_data is None')
+
+        if not string_data is None:
+            self.write_bytes(map(ord, string_data))
 
     def bytespan(self):
         return align(self.bitspan, self.alignment) / 8
