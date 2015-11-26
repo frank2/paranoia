@@ -37,39 +37,68 @@ class NumericRegion(memory_region.MemoryRegion):
 
     def get_value(self):
         bitlist = self.read_bits_from_bytes(self.bitspan)
-        bitspan_content = bitlist_to_bytelist(bitlist)
 
-        # the bytelist comes out endian-agnostic, so if it's little endian, we
-        # need to reverse it.
-        if self.endianness == NumericRegion.LITTLE_ENDIAN:
-            bitspan_content = bitspan_content[::-1]
+        if self.alignment == self.ALIGN_BYTE:
+            bitspan_content = bitlist_to_bytelist(bitlist)
 
-        value = 0
+            # the bytelist comes out endian-agnostic, so if it's little endian, we
+            # need to reverse it.
+            if self.endianness == NumericRegion.LITTLE_ENDIAN:
+                bitspan_content = bitspan_content[::-1]
 
-        for i in xrange(len(bitspan_content)):
-            value <<= 8
-            value |= bitspan_content[i]
+            value = 0
 
-        return value
+            for i in xrange(len(bitspan_content)):
+                value <<= 8
+                value |= bitspan_content[i]
+
+            return value
+        elif self.alignment == self.ALIGN_BIT:
+            value = 0
+
+            for bit in bitlist:
+                value <<= 1
+                value |= bit
+
+            return value
 
     def set_value(self, value):
         bytelist = list()
         bitspan = self.bitspan
         old_value = value
 
-        while bitspan > 0:
-            bytelist.append(value & 0xFF)
-            value >>= 8
-            bitspan -= 8
+        # XXX HACK bitfields are a very strange edgecase. endianness only
+        # mostly applies to byte-bound elements. do something different
+        # with bit-bound elements.
+        if self.alignment == self.ALIGN_BYTE:
+            while bitspan > 0:
+                bytelist.append(value & 0xFF)
+                value >>= 8
+                bitspan -= 8
 
-        # bytelist is little endian, so only reverse it if we're big endian
-        if self.endianness == NumericRegion.BIG_ENDIAN:
-            bytelist = bytelist[::-1]
+            # bytelist is little endian, so only reverse it if we're big endian
+            if self.endianness == NumericRegion.BIG_ENDIAN:
+                bytelist = bytelist[::-1]
 
-        bitspan_content = bytelist_to_bitlist(bytelist)
+            bitspan_content = bytelist_to_bitlist(bytelist)
 
-        # truncate the binary list to the current bitspan
-        self.write_bits(bitspan_content[-self.bitspan:])
+            self.write_bits(bitspan_content)
+        elif self.alignment == self.ALIGN_BIT:
+            bits = 0
+            bitlist = list()
+
+            while value > 0 and bits < self.bitspan:
+                bitlist.append(value & 1)
+                value >>= 1
+                bits += 1
+
+            bitlist.reverse()
+
+            if not len(bitlist) == self.bitspan:
+                delta = self.bitspan - len(bitlist)
+                bitlist = ([0] * delta) + bitlist
+
+            self.write_bits(bitlist)
 
     def __int__(self):
         return self.get_value()
