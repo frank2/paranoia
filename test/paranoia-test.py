@@ -131,6 +131,22 @@ def test_NumericTypes():
     assert qword_object.get_value() == 0x2222222222222222
     print '[Qword: PASS]'
 
+def test_Float():
+    print '[test_Float]'
+
+    floats = [2.625, -4.75, 0.40625, -12.0, 1.7, -1313.3125, 0.1015625, 39887.5625, 728.25]
+
+    for f in floats:
+        float_obj = Float(value=f)
+        float_obj.get_value()
+        
+        double_obj = Double(value=f)
+        double_obj.get_value()
+
+        print '==='
+
+    sys.exit(0)
+
 def test_CharTypes():
     # allocate a string
     c_address = ALLOCATOR.allocate_string('Character Buffer')
@@ -434,6 +450,7 @@ def main(*args):
     test_MemoryRegion()
     test_NumericRegion()
     test_NumericTypes()
+    test_Float()
     test_CharTypes()
     test_Declaration()
     test_List()
