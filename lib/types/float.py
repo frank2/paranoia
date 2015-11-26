@@ -31,8 +31,6 @@ class FloatStub(object):
         if not isinstance(value, (float, int)):
             raise FloatError('input value must be a float or an int')
 
-        print value
-        
         signage = int(value < 0)
         self.sign.set_value(signage)
 
@@ -97,8 +95,6 @@ class FloatStub(object):
         self.exponent.set_value(exponent)
         self.fraction.set_value(fraction)
             
-        print normalize, (2 ** (self.exponent.bitspan - 1)), exponent, bin(self.exponent.get_value()), bin(self.fraction.get_value())
-
     def get_value(self):
         if getattr(self, 'sign', None) is None:
             raise FloatError('float object has no sign object')
@@ -131,9 +127,7 @@ class FloatStub(object):
         if int(self.sign):
             result *= -1
 
-        print int(self.exponent), exponent, fraction_list, result
-        return result
-            
+        return result * 1.0
 
     def __int__(self):
         return int(float(self))

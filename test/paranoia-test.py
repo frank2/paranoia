@@ -8,6 +8,7 @@ import sys
 
 from paranoia import *
 list = __builtins__.list # paranoia clobbers list on import of everything
+float = __builtins__.float # paranoia also clobbers float
 
 ALLOCATOR = Allocator()
 
@@ -137,16 +138,11 @@ def test_Float():
     floats = [2.625, -4.75, 0.40625, -12.0, 1.7, -1313.3125, 0.1015625, 39887.5625, 728.25]
 
     for f in floats:
-        float_obj = Float(value=f)
-        float_obj.get_value()
-        
         double_obj = Double(value=f)
-        double_obj.get_value()
+        assert float(double_obj) == f
 
-        print '==='
-
-    sys.exit(0)
-
+    print '[Float: PASS]'
+        
 def test_CharTypes():
     # allocate a string
     c_address = ALLOCATOR.allocate_string('Character Buffer')
@@ -400,7 +396,7 @@ def test_Union():
     # FIXME not sure if this test is correct.
     union_instance.structure.byte_obj.set_value(0x42)
     assert union_instance.array[6].get_value() == 0x42
-    assert union_instance.bitfield.get_value() == 0x8400840000008400
+    assert union_instance.bitfield.get_value() == 0x8400000084008400
 
     print '[Union: PASS]'
 
@@ -450,12 +446,12 @@ def main(*args):
     test_MemoryRegion()
     test_NumericRegion()
     test_NumericTypes()
-    test_Float()
     test_CharTypes()
     test_Declaration()
     test_List()
     test_Array()
     test_Structure()
+    test_Float()
     test_Union()
     test_Pointer()
 
