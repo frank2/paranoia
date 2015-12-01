@@ -7,16 +7,12 @@ class PointerError(numeric_region.NumericRegionError):
     pass
 
 class Pointer(numeric_region.NumericRegion):
-    # TODO c-style pointer math
     CASTING_CLASS = None
 
     def __init__(self, **kwargs):
         self.casting_class = kwargs.setdefault('casting_class', self.CASTING_CLASS)
 
-        if self.casting_class is None:
-            raise PointerError('no casting class given to pointer')
-        
-        if not issubclass(self.casting_class, memory_region.MemoryRegion):
+        if self.casting_class and not issubclass(self.casting_class, memory_region.MemoryRegion):
             raise PointerError('casting class must implement MemoryRegion')
         
         numeric_region.NumericRegion.__init__(self, **kwargs)
