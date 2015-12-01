@@ -166,7 +166,6 @@ def test_CharTypes():
     assert char_object.get_char_value() == 'D'
     print '[Char.set_char_value: PASS]'
 
-    # FIXME wchars are broken. run these tests another time.
     print '[test_Wchar]'
 
     wchar_object = Wchar(memory_base=c_address)
