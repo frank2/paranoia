@@ -8,3 +8,13 @@ class Byte(numeric_region.NumericRegion):
 
 class ByteArray(array.Array):
     BASE_CLASS = Byte
+
+    def __str__(self):
+        result = list()
+
+        for i in xrange(self.elements):
+            result.append(chr(self[i].get_value()))
+
+        return ''.join(result)
+
+            
