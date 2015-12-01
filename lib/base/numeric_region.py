@@ -37,6 +37,7 @@ class NumericRegion(memory_region.MemoryRegion):
 
     def get_value(self):
         bitlist = self.read_bits_from_bytes(self.bitspan)
+        value = 0
 
         if self.alignment == self.ALIGN_BYTE:
             bitspan_content = bitlist_to_bytelist(bitlist)
@@ -46,13 +47,9 @@ class NumericRegion(memory_region.MemoryRegion):
             if self.endianness == NumericRegion.LITTLE_ENDIAN:
                 bitspan_content = bitspan_content[::-1]
 
-            value = 0
-
             for i in xrange(len(bitspan_content)):
                 value <<= 8
                 value |= bitspan_content[i]
-
-            return value
         elif self.alignment == self.ALIGN_BIT:
             value = 0
 
@@ -60,16 +57,23 @@ class NumericRegion(memory_region.MemoryRegion):
                 value <<= 1
                 value |= bit
 
-            return value
+        signed_bit = 2 ** (self.bitspan - 1)
+        
+        if self.signage == self.SIGNED and value & signed_bit:
+            value = value - 2 ** self.bitspan
+
+        return value
 
     def set_value(self, value):
         bytelist = list()
         bitspan = self.bitspan
-        old_value = value
 
-        # XXX HACK bitfields are a very strange edgecase. endianness only
-        # mostly applies to byte-bound elements. do something different
-        # with bit-bound elements.
+        if value < 0:
+            value += 2 ** self.bitspan
+
+            if value <= 0:
+                raise NumericRegionError('negative overflow')
+
         if self.alignment == self.ALIGN_BYTE:
             while bitspan > 0:
                 bytelist.append(value & 0xFF)
