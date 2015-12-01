@@ -74,6 +74,8 @@ class NumericRegion(memory_region.MemoryRegion):
             if value <= 0:
                 raise NumericRegionError('negative overflow')
 
+        value &= (2 ** self.bitspan) - 1
+
         if self.alignment == self.ALIGN_BYTE:
             while bitspan > 0:
                 bytelist.append(value & 0xFF)

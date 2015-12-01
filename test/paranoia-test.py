@@ -90,16 +90,25 @@ def test_NumericRegion():
     region.set_value(0x88443322)
     assert region.get_value() == 0x88443322
     region.bitspan = 16
-    region.set_value(0x77995566)
+    region.set_value(0x5566)
     assert region.get_value() == 0x5566
     region.bitspan = 32
     region.endianness = NumericRegion.BIG_ENDIAN
     region.set_value(0x88443322)
     assert region.get_value() == 0x88443322
+    assert region.read_bytes(4) == [136, 68, 51, 34]
     region.bitspan = 16
-    region.set_value(0x77995566)
+    region.set_value(0x5566)
     assert region.get_value() == 0x5566
     print '[NumericRegion.set_value: PASS]'
+
+    region.signage = NumericRegion.SIGNED
+    region.bitspan = 32
+    region.set_value(0xFFFFFFFF)
+    assert region.get_value() == -1
+    region.set_value(-2)
+    assert region.get_value() == -2
+    print '[NumericRegion.SIGNED: PASS]'
 
 def test_NumericTypes():
     print '[test_Bitfield]'
