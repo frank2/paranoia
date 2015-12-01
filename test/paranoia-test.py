@@ -167,11 +167,13 @@ def test_CharTypes():
     print '[Char.set_char_value: PASS]'
 
     # FIXME wchars are broken. run these tests another time.
-    #print '[test_Wchar]'
+    print '[test_Wchar]'
 
-    #wchar_object = paranoia.Wchar(memory_base=c_address)
-    #wchar_object.set_wchar_value(u'한')
-    #assert wchar_object.get_wchar_value() == u'한'
+    wchar_object = Wchar(memory_base=c_address)
+    wchar_object.set_wchar_value(u'한')
+    assert wchar_object.get_wchar_value() == u'한'
+
+    print '[Wchar: PASS]'
 
     ALLOCATOR.deallocate(c_address)
 

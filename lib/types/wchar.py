@@ -9,7 +9,7 @@ class WcharError(numeric_region.NumericRegionError):
 
 class Wchar(word.Word):
     def get_wchar_value(self):
-        return ''.join(map(chr, self.read_bytes_from_bits(2))).decode('utf-16')
+        return ''.join(map(chr, self.read_bytes(2))).decode('utf-16be')
 
     def set_wchar_value(self, wchar):
         if not isinstance(wchar, unicode):
