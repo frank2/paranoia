@@ -8,6 +8,7 @@ from . import dword
 from . import qword
 from . import oword
 from . import float
+from . import string
 from . import structure
 from . import union
 from . import wchar
@@ -24,6 +25,7 @@ __all__ = concat_modules(__name__
                            ,qword
                            ,oword
                            ,float
+                           ,string
                            ,structure
                            ,union
                            ,wchar])

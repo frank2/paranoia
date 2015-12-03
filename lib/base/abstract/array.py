@@ -15,7 +15,7 @@ class Array(d_list.List):
         self.elements = kwargs.setdefault('elements', self.ELEMENTS)
 
         if self.elements == 0:
-            raise DataArrayError('elements cannot be 0')
+            raise ArrayError('elements cannot be 0')
 
         kwargs['declarations'] = [declaration.Declaration(base_class=self.base_class) for i in xrange(self.elements)]
 

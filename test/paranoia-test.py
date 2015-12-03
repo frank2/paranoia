@@ -289,6 +289,21 @@ def test_Array():
 
     ALLOCATOR.deallocate(c_address)
 
+def test_String():
+    print '[test_String]'
+    
+    test_string = 'string\x00data\x00here\x00'
+    char_array = CharArray(elements=len(test_string)
+                           ,string_data=test_string)
+    string_obj = String(memory_base=char_array.memory_base)
+    assert str(string_obj) == 'string'
+    string_obj[6].set_char_value(' ')
+    assert str(string_obj) == 'string data'
+    string_obj.set_value('str data')
+    assert str(string_obj) == 'str data'
+
+    print '[String: PASS]'
+
 def test_Structure():
     print '[test_Structure]'
 
@@ -460,6 +475,7 @@ def main(*args):
     test_Declaration()
     test_List()
     test_Array()
+    test_String()
     test_Structure()
     test_Float()
     test_Union()
