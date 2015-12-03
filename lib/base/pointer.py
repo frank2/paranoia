@@ -31,6 +31,20 @@ class Pointer(numeric_region.NumericRegion):
         
         return casting_class(memory_base=address)
 
+    def read_pointed_bytes(self, byte_length, byte_offset=0):
+        memory_base = self.memory_value() + byte_offset
+        region = memory_region.MemoryRegion(memory_base=memory_base
+                                            ,bitspan=byte_length*8
+                                            ,parent_region=self)
+        return region.read_bytes(byte_length)
+
+    def write_pointed_bytes(self, byte_list, byte_offset=0):
+        memory_base = self.memory_value() + byte_offset
+        region = memory_region.MemoryRegion(memory_base=memory_base
+                                            ,bitspan=len(byte_list)*8
+                                            ,parent_region=self)
+        return region.write_bytes(byte_list)
+
     def __add__(self, addend):
         if self.casting_class is None:
             raise PointerError('pointer arithmetic not possible without cast')

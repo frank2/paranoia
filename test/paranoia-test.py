@@ -454,6 +454,10 @@ def test_Pointer():
     pointer_64.set_value(qword_obj.memory_base)
     assert pointer_64.deref().get_value() == 0x6464646464646464
 
+    assert pointer_64.read_pointed_bytes(4) == [0x64, 0x64, 0x64, 0x64]
+    pointer_64.write_pointed_bytes([0x32]*4, 4)
+    assert int(pointer_64.deref()) == 0x3232323264646464
+
     array_pointer_front = pointer_class.cast(Dword)(value=dword_array.memory_base)
     array_pointer_middle = array_pointer_front + 10
 
