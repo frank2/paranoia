@@ -14,17 +14,21 @@ ALLOCATOR = Allocator()
 
 def test_Allocator():
     byte_buffer = ALLOCATOR.allocate(20)
-    assert ALLOCATOR.address_map.has_key(byte_buffer)
-    assert len(ALLOCATOR.address_map[byte_buffer].raw) == 20
+    assert ALLOCATOR.address_map.has_key(byte_buffer.address)
+    assert len(byte_buffer.read_string()) == 20
 
     string_buffer = ALLOCATOR.allocate_string('string')
-    assert ALLOCATOR.address_map.has_key(string_buffer)
-    assert len(ALLOCATOR.address_map[string_buffer].raw) == len('string\x00')
+    assert ALLOCATOR.address_map.has_key(string_buffer.address)
+    assert len(string_buffer.read_string()) == len('string\x00')
 
-    ALLOCATOR.deallocate(string_buffer)
-    ALLOCATOR.deallocate(byte_buffer)
-    assert not ALLOCATOR.address_map.has_key(string_buffer)
-    assert not ALLOCATOR.address_map.has_key(byte_buffer)
+    string_address = string_buffer.address
+    byte_address = byte_buffer.address
+
+    string_buffer.free()
+    byte_buffer.free()
+    
+    assert not ALLOCATOR.address_map.has_key(string_address)
+    assert not ALLOCATOR.address_map.has_key(byte_address)
 
 def test_MemoryRegion():
     print '[test_MemoryRegion]'
@@ -154,8 +158,8 @@ def test_Float():
         
 def test_CharTypes():
     # allocate a string
-    c_address = ALLOCATOR.allocate_string('Character Buffer')
-    c_string = ALLOCATOR.address_map[c_address]
+    c_buffer = ALLOCATOR.allocate_string('Character Buffer')
+    c_address = c_buffer.address
 
     print '[test_Char]'
     char_object = Char(memory_base=c_address)
@@ -174,12 +178,12 @@ def test_CharTypes():
 
     print '[Wchar: PASS]'
 
-    ALLOCATOR.deallocate(c_address)
+    ALLOCATOR.free(c_address)
 
 def test_Declaration():
     # allocate a string
-    c_address = ALLOCATOR.allocate_string('Character Buffer')
-    c_string = ALLOCATOR.address_map[c_address]
+    c_buffer = ALLOCATOR.allocate_string('Character Buffer')
+    c_address = c_buffer.address
 
     print '[test_Declaration]'
     declaration = Declaration(base_class=Byte)
@@ -199,12 +203,12 @@ def test_Declaration():
     assert declaration.bitspan() == 4
     print '[Declaration.bitspan: PASS]'
 
-    ALLOCATOR.deallocate(c_address)
+    ALLOCATOR.free(c_address)
 
 def test_List():
     # allocate a string
-    c_address = ALLOCATOR.allocate_string("\x00\x01\x01\x02\x02\x02\x02\x03\x03\x03\x03\x03\x03\x03\x03")
-    c_string = ALLOCATOR.address_map[c_address]
+    c_buffer = ALLOCATOR.allocate_string("\x00\x01\x01\x02\x02\x02\x02\x03\x03\x03\x03\x03\x03\x03\x03")
+    c_address = c_buffer.address
 
     print '[test_List]'
     data_list = List(declarations=[Declaration(base_class=Byte)
@@ -254,10 +258,11 @@ def test_List():
     assert data_list.declaration_offsets[2]['memory_base'] == c_address+5
     print '[List.insert_declaration: PASS]'
 
-    ALLOCATOR.deallocate(c_address)
+    ALLOCATOR.free(c_address)
 
 def test_Array():
-    c_address = ALLOCATOR.allocate(20)
+    c_buffer = ALLOCATOR.allocate(20)
+    c_address = c_buffer.address
 
     # TODO what's the test-case for an array of bitfields?
     print '[test_Array]'
@@ -287,7 +292,7 @@ def test_Array():
     assert byte_array.instantiate(5).get_value() == 0x50
     print '[Array.static_size: PASS]'
 
-    ALLOCATOR.deallocate(c_address)
+    ALLOCATOR.free(c_address)
 
 def test_String():
     print '[test_String]'
@@ -333,7 +338,8 @@ def test_Structure():
             ,('anon_dword_2', Dword)]))])
 
     struct_size = structure_class.static_bitspan() / 8
-    c_address = ALLOCATOR.allocate(struct_size)
+    c_buffer = ALLOCATOR.allocate(struct_size)
+    c_address = c_buffer.address
     structure_instance = structure_class(memory_base=c_address)
 
     assert isinstance(structure_instance.word_obj, Word)

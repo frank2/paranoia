@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import platform
 import ctypes
 
 from . import paranoia_agent
@@ -7,19 +8,40 @@ from . import paranoia_agent
 class AllocatorError(paranoia_agent.ParanoiaError):
     pass
 
+class AllocationError(paranoia_agent.ParanoiaError):
+    pass
+
 class Allocator(paranoia_agent.ParanoiaAgent):
     def __init__(self, **kwargs):
+        crt_module = None
+        system = platform.system()
+
+        if system == 'Windows':
+            crt_module = cdll.msvcrt
+        elif system == 'Linux' or system.startswith('CYGWIN'):
+            crt_module = ctypes.cdll.LoadLibrary('libc.so.6')
+        else:
+            AllocatorError('unsupported platform %s' % system)
+
+        self.crt_malloc = crt_module.malloc
+        self.crt_realloc = crt_module.realloc
+        self.crt_free = crt_module.free
+        self.crt_memset = crt_module.memset
+        # do not import the crt version of memmove... for some reason it segfaults
+            
         self.address_map = dict()
 
     def allocate(self, byte_length):
         if not isinstance(byte_length, (int, long)):
             raise AllocatorError('integer value not given')
 
-        c_string = ctypes.create_string_buffer(byte_length)
-        c_address = ctypes.addressof(c_string)
-        self.address_map[c_address] = c_string
+        heap_address = self.crt_malloc(byte_length)
+        self.crt_memset(heap_address, 0, byte_length)
+        
+        allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
+        self.address_map[heap_address] = allocation
 
-        return c_address
+        return allocation
 
     def allocate_string(self, string):
         if not isinstance(string, basestring):
@@ -27,19 +49,128 @@ class Allocator(paranoia_agent.ParanoiaAgent):
 
         c_string = ctypes.create_string_buffer(string)
         c_address = ctypes.addressof(c_string)
-        self.address_map[c_address] = c_string
-        
-        return c_address
+        allocation = self.allocate(len(string)+1)
+        ctypes.memmove(allocation.address, c_address, len(string))
 
-    def deallocate(self, address):
+        return allocation
+
+    def reallocate(self, address, size):
+        if not isinstance(address, (int, long)):
+            raise AllocatorError('integer value not given for address')
+
+        if not isinstance(address, (int, long)):
+            raise AllocatorError('integer value not given for address')
+
         if not self.address_map.has_key(address):
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
-        c_string = self.address_map[address]
+        allocation = self.address_map[address]
+        new_address = self.crt_reallocate(address, size)
+        del self.address_map[address]
+        self.address_map[new_address] = allocation
+        
+        allocation.address = new_address
+        allocation.size = size
 
-        del c_string
+        return allocation
+
+    def free(self, address):
+        if not self.address_map.has_key(address):
+            raise AllocatorError('no such address allocated: 0x%x' % address)
+
+        self.crt_free(address)
+        allocation = self.address_map[address]
+        allocation.address = 0
+        allocation.size = 0
         del self.address_map[address]
 
     def __del__(self):
         for address in self.address_map.keys():
-            self.deallocate(address)
+            self.free(address)
+
+class Allocation(paranoia_agent.ParanoiaAgent):
+    ADDRESS = None
+    SIZE = None
+    ALLOCATOR = None
+    
+    def __init__(self, **kwargs):
+        self.address = kwargs.setdefault('address', self.ADDRESS)
+        self.size = kwargs.setdefault('size', self.SIZE)
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+
+        if self.address is None:
+            raise AllocationError('address cannot be None')
+        if self.size is None:
+            raise AllocationError('size cannot be None')
+        if self.allocator is None:
+            raise AllocationError('allocator cannot be None')
+
+        if not isinstance(self.address, (int, long)):
+            raise AllocationError('address must be an integer')
+        if not isinstance(self.size, (int, long)):
+            raise AllocationError('size must be an integer')
+        if not isinstance(self.allocator, Allocator):
+            raise AllocationError('allocator must be an Allocator instance')
+
+    def is_null(self):
+        return self.address == 0
+    
+    def check_address(self):
+        if self.is_null():
+            raise AllocationError('address is null')
+
+    def reallocate(self, size):
+        self.check_address()
+        self.allocator.reallocate(self.address, size)
+
+    def free(self):
+        if self.is_null():
+            return
+        
+        self.allocator.free(self.address)
+
+    def read_string(self, size=None):
+        self.check_address()
+        
+        if size is None:
+            size = self.size
+
+        if size > self.size:
+            raise AllocationError('size exceeds allocation size')
+            
+        return ctypes.string_at(self.address, size)
+
+    def read_bytes(self, size=None):
+        self.check_address()
+        
+        if size is None:
+            size = self.size
+
+        if size > self.size:
+            raise AllocationError('size exceeds allocation size')
+
+        return map(ord, self.read_string(size))
+
+    def write_string(self, string):
+        self.check_address()
+        
+        if not isinstance(string, basestring):
+            raise AllocationError('string value not given')
+
+        if len(string) > self.size:
+            raise AllocationError('string would overflow allocation')
+        
+        c_string = ctypes.create_string_buffer(string)
+        c_address = ctypes.addressof(c_string)
+        self.allocator.crt_memmove(self.address, c_address, len(string))
+
+    def write_bytes(self, byte_list):
+        self.check_address()
+        
+        if not getattr(byte_list, '__iter__', None):
+            raise AllocationError('byte_list not iterable')
+
+        return self.write_string(''.join(map(chr, byte_list)))
+
+    def __del__(self):
+        self.free()

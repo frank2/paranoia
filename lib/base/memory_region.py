@@ -21,6 +21,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     BITSPAN = None
     MEMORY_BASE = None
     AUTO_ALLOCATE = True
+    ALLOCATION = None
     PARENT_REGION = None
     ALLOCATOR_CLASS = allocator.Allocator
     ALLOCATOR = None
@@ -34,7 +35,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         paranoia_agent.ParanoiaAgent.__init__(self)
 
         self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
-        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)        
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+        self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
@@ -46,6 +48,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         if not string_data is None and not isinstance(string_data, basestring):
             raise MemoryRegionError('string_data must be a string')
+
+        if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
+            raise MemoryRegionError('allocation must implement allocator.Allocation')
 
         if self.bitspan is None and not string_data is None:
             self.bitspan = len(string_data)*8
@@ -85,10 +90,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         elif not isinstance(self.allocator, allocator.Allocator):
             raise MemoryRegionError('allocator must implement allocator.Allocator')
 
-        if self.memory_base is None and self.auto_allocate:
-            self.memory_base = self.allocator.allocate(self.shifted_bytespan())
-        elif self.memory_base is None:
-            raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and string_data is None')
+        if self.memory_base is None:
+            if self.auto_allocate:
+                self.allocation = self.allocator.allocate(self.shifted_bytespan())
+                self.memory_base = self.allocation.address
+            elif self.allocation:
+                self.memory_base = self.allocation.address
+            else:
+                raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
 
         if not string_data is None:
             self.write_bytes(map(ord, string_data))
@@ -225,6 +234,21 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             root_parent = root_parent.parent_region
 
         return root_parent
+
+    def reallocate(self, size, bitspan=None):
+        if self.allocation is None:
+            raise MemoryRegionError('no allocation to resize')
+
+        self.allocation.reallocate(size)
+        self.memory_base = self.allocation.address
+
+        if bitspan is None:
+            self.bitspan = size*8
+        else:
+            if size*8 < (bitspan+self.bitshift):
+                raise MemoryRegionError('size allocation cannot cover new bitspan')
+            
+            self.bitspan = bitspan
 
     def __hash__(self):
         return hash('%X/%d/%d' % (self.memory_base, self.bitspan, self.bitshift))
