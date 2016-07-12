@@ -47,12 +47,15 @@ class Array(d_list.List):
             super(Array, self).__setattr__(attr, value)
 
     @classmethod
-    def static_bitspan(cls):
-        if cls.BASE_CLASS is None:
+    def static_bitspan(cls, **kwargs):
+        base_class = kwargs.setdefault('base_class', cls.BASE_CLASS)
+        
+        if base_class is None:
             raise ArrayError('no base class to get base bitspan from')
 
-        base_bitspan = cls.BASE_CLASS.static_bitspan()
-        return base_bitspan * cls.ELEMENTS
+        base_bitspan = base_class.static_bitspan()
+        elements = kwargs.setdefault('elements', cls.ELEMENTS)
+        return base_bitspan * elements
 
     @classmethod
     def static_size(cls, size):

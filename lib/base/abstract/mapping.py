@@ -25,13 +25,19 @@ class Mapping(d_list.List):
         self.declarations = list()
         self.field_map = dict()
         self.anon_map = dict()
+        size_hints = list()
         anonymous_fields = 0
 
-        for pair in fields:
+        for i in xrange(len(fields)):
+            pair = fields[i]
             if not len(pair) == 2 and not isinstance(pair[0], basestring) and not pair[0] == None and not isinstance(pair[1], declaration.Declaration):
                 raise MappingError('field_declaration element must be a pair consisting of a string or None paired with a Declaration.')
             
             name, declaration_obj = pair
+
+            if declaration_obj.is_size_hint():
+                declaration_obj.args['my_declaration'] = i
+                size_hints.append(declaration_obj)
 
             if name == None:
                 if not issubclass(declaration_obj.base_class, Mapping):
@@ -60,6 +66,9 @@ class Mapping(d_list.List):
 
             self.field_map[name] = index
 
+        for hint in size_hints:
+            hint.args['target_declaration'] = self.field_map[hint.target_declaration()]
+
     def __getattr__(self, attr):
         if not self.__dict__.has_key('field_map') and not self.__dict__.has_key('anon_map') and not self.__dict__.has_key(attr):
             raise AttributeError(attr)
@@ -84,8 +93,8 @@ class Mapping(d_list.List):
             raise AttributeError(attr)
 
     @classmethod
-    def static_bitspan(cls):
-        return sum(map(lambda x: x[1].bitspan(), cls.FIELDS))
+    def static_bitspan(cls, **kwargs):
+        return sum(map(lambda x: x[1].bitspan(), kwargs.setdefault('fields', cls.FIELDS)))
 
     @classmethod
     def simple(cls, declarations):

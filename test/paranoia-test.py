@@ -216,9 +216,9 @@ def test_List():
                                    ,Declaration(base_class=Dword)]
                          ,memory_base=c_address)
     
-    assert data_list.declaration_offsets[0]['memory_base'] == c_address
-    assert data_list.declaration_offsets[1]['memory_base'] == c_address+1
-    assert data_list.declaration_offsets[2]['memory_base'] == c_address+3
+    assert data_list.declaration_offsets[0]['memory_offset'] == 0
+    assert data_list.declaration_offsets[1]['memory_offset'] == 1
+    assert data_list.declaration_offsets[2]['memory_offset'] == 3
 
     byte_item = data_list.instantiate(0)
     assert isinstance(byte_item, Byte)
@@ -238,7 +238,7 @@ def test_List():
     print '[List.instantiate: PASS]'
 
     data_list.append_declaration(Declaration(base_class=Qword))
-    assert data_list.declaration_offsets[3]['memory_base'] == c_address+7
+    assert data_list.declaration_offsets[3]['memory_offset'] == 7
     qword_item = data_list.instantiate(3)
     assert isinstance(qword_item, Qword)
     assert qword_item.get_value() == 0x303030303030303
@@ -255,8 +255,24 @@ def test_List():
     dword_item = data_list.instantiate(1)
     assert isinstance(dword_item, Dword)
     assert dword_item.memory_base == c_address+1
-    assert data_list.declaration_offsets[2]['memory_base'] == c_address+5
+    assert data_list.declaration_offsets[2]['memory_offset'] == 5
     print '[List.insert_declaration: PASS]'
+
+    data_list.append_declaration(Declaration(base_class=SizeHint
+                                             ,args={'target_declaration': 5
+                                                    ,'argument': 'elements'
+                                                    ,'bitspan': 8}))
+    data_list.append_declaration(Declaration(base_class=Array
+                                             ,args={'base_class': Dword}))
+    hint_object = data_list.instantiate(4)
+
+    assert hint_object.my_declaration == 4
+    hint_object.set_value(1)
+
+    array_object = data_list.instantiate(5)
+    assert array_object.bitspan == 32
+    array_object[0].set_value(0x42424242)
+    assert array_object[0].get_value() == 0x42424242
 
     ALLOCATOR.free(c_address)
 
@@ -335,7 +351,11 @@ def test_Structure():
         ,(None, Structure.simple([
             ('anon_byte_2', Byte)
             ,('anon_word_2', Word)
-            ,('anon_dword_2', Dword)]))])
+            ,('anon_dword_2', Dword)]))
+        ,('size_hint', SizeHint, {'bitspan': 16
+                                  ,'target_declaration': 'sized_array'
+                                  ,'argument': 'elements'})
+        ,('sized_array', Array, {'base_class': Word})])
 
     struct_size = structure_class.static_bitspan() / 8
     c_buffer = ALLOCATOR.allocate(struct_size)
@@ -388,6 +408,9 @@ def test_Structure():
     anon_dword = structure_instance.anon_dword_2
     anon_dword.set_value(0x42)
     assert structure_instance.anon_dword_2.get_value() == 0x42
+
+    structure_instance.size_hint.set_value(4)
+    assert structure_instance.sized_array.elements == 4
 
     print '[Structure: PASS]'
 

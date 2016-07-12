@@ -17,7 +17,7 @@ class Union(mapping.Mapping):
             bitspan = declaration.bitspan()
             alignment = declaration.alignment()
 
-            offset_dict['memory_base'] = self.memory_base
+            offset_dict['memory_offset'] = 0
             offset_dict['bitshift'] = self.bitshift
 
             self.declaration_offsets[i] = offset_dict
@@ -28,5 +28,5 @@ class Union(mapping.Mapping):
         self.bitspan = longest_object
 
     @classmethod
-    def static_bitspan(cls):
-        return max(map(lambda x: x[1].bitspan(), cls.FIELDS))
+    def static_bitspan(cls, **kwargs):
+        return max(map(lambda x: x[1].bitspan(), kwargs.setdefault('fields', cls.FIELDS)))

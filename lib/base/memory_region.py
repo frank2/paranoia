@@ -70,23 +70,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('parent_region must implement MemoryRegion')
 
         if self.allocator is None:
-            if self.parent_region is None:
-                self.allocator = self.allocator_class(**kwargs)
-            elif not self.allocator_class == self.parent_region.allocator_class:
-                self.allocator = self.parent_region.allocator_class(**kwargs)
-            else:
-                parent_region = self.parent_region
-
-                while not parent_region is None:
-                    if not self.allocator_class == parent_region.allocator_class:
-                        break
-
-                    parent_region = parent_region.parent_region
-
-                if parent_region is None:
-                    self.allocator = self.allocator_class(**kwargs)
-                else:
-                    self.allocator = parent_region.allocator_class(**kwargs)
+            self.allocator = self.allocator_class(**kwargs)
         elif not isinstance(self.allocator, allocator.Allocator):
             raise MemoryRegionError('allocator must implement allocator.Allocator')
 
@@ -103,13 +87,21 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             self.write_bytes(map(ord, string_data))
 
     def bytespan(self):
-        return align(self.bitspan, self.alignment) / 8
+        aligned = align(self.bitspan, self.alignment)
+        bytecount = aligned/8
+        extra = int(aligned % 8 != 0)
+        
+        return bytecount + extra
 
     def shifted_bitspan(self):
         return self.bitspan + self.bitshift
 
     def shifted_bytespan(self):
-        return align(self.shifted_bitspan(), self.alignment) / 8
+        aligned = align(self.shifted_bitspan(), self.alignment)
+        bytecount = aligned/8
+        extra = int(aligned % 8 != 0)
+        
+        return bytecount + extra
     
     def read_bytes(self, byte_length, byte_offset=0):
         if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
@@ -235,35 +227,35 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         return root_parent
 
-    def reallocate(self, size, bitspan=None):
-        if self.allocation is None:
+    def is_allocated(self):
+        return not self.allocation is None and isinstance(self.allocation, allocator.Allocation)
+
+    def reallocate(self, bitspan):
+        if not self.is_allocated():
             raise MemoryRegionError('no allocation to resize')
 
-        self.allocation.reallocate(size)
+        aligned = (bitspan + self.bitshift, self.alignment) / 8
+        extra = int(aligned % 8 != 0)
+        new_bytespan = aligned + extra
+        
+        self.allocation.reallocate(new_bytespan)
         self.memory_base = self.allocation.address
-
-        if bitspan is None:
-            self.bitspan = size*8
-        else:
-            if size*8 < (bitspan+self.bitshift):
-                raise MemoryRegionError('size allocation cannot cover new bitspan')
-            
-            self.bitspan = bitspan
+        self.bitspan = bitspan
 
     def __hash__(self):
         return hash('%X/%d/%d' % (self.memory_base, self.bitspan, self.bitshift))
 
     @classmethod
-    def static_bitspan(cls):
-        return cls.BITSPAN
+    def static_bitspan(cls, **kwargs):
+        return kwargs.setdefault('bitspan', cls.BITSPAN)
 
     @classmethod
     def static_alignment(cls):
         return cls.ALIGNMENT
 
     @classmethod
-    def static_bytespan(cls):
-        bitspan = cls.static_bitspan()
+    def static_bytespan(cls, **kwargs):
+        bitspan = cls.static_bitspan(**kwargs)
         alignment = cls.static_alignment()
         return align(bitspan, alignment) / 8
 

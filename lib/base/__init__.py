@@ -6,6 +6,7 @@ from . import memory_region
 from . import numeric_region
 from . import paranoia_agent
 from . import pointer
+from . import size_hint
 
 from paranoia import concat_modules
 
@@ -17,4 +18,5 @@ __all__ = concat_modules(__name__
                            ,memory_region
                            ,numeric_region
                            ,paranoia_agent
-                           ,pointer])
+                           ,pointer
+                           ,size_hint])
