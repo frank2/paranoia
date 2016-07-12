@@ -102,15 +102,15 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         extra = int(aligned % 8 != 0)
         
         return bytecount + extra
-    
-    def read_bytes(self, byte_length, byte_offset=0):
+
+    def read_string(self, byte_length, byte_offset=0):
         if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
             raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
-
-        try:
-            return map(ord, ctypes.string_at(self.memory_base+byte_offset, byte_length))
-        except:
-            raise MemoryRegionError('raw memory access failed')
+        
+        return ctypes.string_at(self.memory_base+byte_offset, byte_length)
+    
+    def read_bytes(self, byte_length, byte_offset=0):
+        return map(ord, self.read_string(byte_length, byte_offset))
 
     def read_bytelist_for_bits(self, bit_length, bit_offset=0):
         if bit_length + bit_offset > self.bitspan:
@@ -152,16 +152,16 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def read_bytes_from_bits(self, bit_length, bit_offset=0):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset))
 
-    def write_bytes(self, byte_list, byte_offset=0):
-        if (len(byte_list)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
+    def write_string(self, string_val, byte_offset=0):
+        if (len(string_val)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
 
-        string_buffer = ctypes.create_string_buffer(''.join(map(chr, byte_list)))
+        string_buffer = ctypes.create_string_buffer(string_val)
+        
+        ctypes.memmove(self.memory_base+byte_offset, ctypes.addressof(string_buffer), len(string_val))
 
-        try:
-            ctypes.memmove(self.memory_base+byte_offset, ctypes.addressof(string_buffer), len(byte_list))
-        except:
-            raise MemoryRegionError('write exceeds region boundaries')
+    def write_bytes(self, byte_list, byte_offset=0):
+        return self.write_string(''.join(map(chr, byte_list)), byte_offset)
 
     def write_bits(self, bit_list, bit_offset=0):
         if len(bit_list) + bit_offset > self.bitspan:
