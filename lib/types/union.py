@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from paranoia.base.abstract import mapping
+from paranoia.meta import mapping
 
 class UnionError(mapping.MappingError):
     pass

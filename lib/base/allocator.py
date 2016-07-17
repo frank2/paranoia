@@ -2,8 +2,10 @@
 
 import platform
 import ctypes
+import traceback
 
-from . import paranoia_agent
+from paranoia.base import paranoia_agent
+from paranoia.base import address
 
 class AllocatorError(paranoia_agent.ParanoiaError):
     pass
@@ -36,6 +38,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
+        print '[allocate]', hex(heap_address)
         self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
@@ -55,6 +58,9 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         return allocation
 
     def reallocate(self, address, size):
+        #print '===reallocate traceback==='
+        #print traceback.print_stack()
+        
         if not isinstance(address, (int, long)):
             raise AllocatorError('integer value not given for address')
 
@@ -65,7 +71,10 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
-        new_address = self.crt_reallocate(address, size)
+
+        #print '[reallocate] before', hex(address)
+        new_address = self.crt_realloc(address, size)
+        #print '[reallocate] after', hex(new_address)
         del self.address_map[address]
         self.address_map[new_address] = allocation
         
@@ -118,6 +127,9 @@ class Allocation(paranoia_agent.ParanoiaAgent):
     def check_address(self):
         if self.is_null():
             raise AllocationError('address is null')
+
+    def address_object(self, offset=0):
+        return address.Address(offset=offset, allocation=self)
 
     def reallocate(self, size):
         self.check_address()

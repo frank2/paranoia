@@ -41,7 +41,6 @@ class SizeHint(numeric_region.NumericRegion):
         if not declarations:
             raise SizeHintError('parent_region has no declarations')
 
-        print '[set_declaration]', self.target_declaration, self.argument, self.get_value()
         declarations[self.target_declaration].args[self.argument] = self.get_value()
 
     def set_value(self, value):

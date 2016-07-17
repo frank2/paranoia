@@ -159,7 +159,7 @@ def test_Float():
 def test_CharTypes():
     # allocate a string
     c_buffer = ALLOCATOR.allocate_string('Character Buffer')
-    c_address = c_buffer.address
+    c_address = c_buffer.address_object()
 
     print '[test_Char]'
     char_object = Char(memory_base=c_address)
@@ -178,22 +178,23 @@ def test_CharTypes():
 
     print '[Wchar: PASS]'
 
-    ALLOCATOR.free(c_address)
+    c_buffer.free()
 
 def test_Declaration():
     # allocate a string
     c_buffer = ALLOCATOR.allocate_string('Character Buffer')
-    c_address = c_buffer.address
+    c_address = c_buffer.address_object()
 
     print '[test_Declaration]'
     declaration = Declaration(base_class=Byte)
-    instantiated = declaration.instantiate(c_address)
+    instantiated = declaration.instantiate(memory_base=c_address)
     assert isinstance(instantiated, Byte)
     assert instantiated.memory_base == c_address
     assert instantiated.get_value() == ord('C')
 
-    instantiated = declaration.instantiate(c_address, 4)
-    assert instantiated.memory_base == c_address
+    instantiated = declaration.instantiate(memory_base=c_address
+                                           ,bitshift=4)
+    assert int(instantiated.memory_base) == int(c_address)
     assert instantiated.bitshift == 4
     print '[Declaration.instantiate: PASS]'
 
@@ -203,12 +204,12 @@ def test_Declaration():
     assert declaration.bitspan() == 4
     print '[Declaration.bitspan: PASS]'
 
-    ALLOCATOR.free(c_address)
+    c_buffer.free()
 
 def test_List():
     # allocate a string
     c_buffer = ALLOCATOR.allocate_string("\x00\x01\x01\x02\x02\x02\x02\x03\x03\x03\x03\x03\x03\x03\x03")
-    c_address = c_buffer.address
+    c_address = c_buffer.address_object()
 
     print '[test_List]'
     data_list = List(declarations=[Declaration(base_class=Byte)
@@ -223,18 +224,18 @@ def test_List():
     byte_item = data_list.instantiate(0)
     assert isinstance(byte_item, Byte)
     assert byte_item.get_value() == 0
-    assert byte_item.memory_base == c_address
+    assert int(byte_item.memory_base) == int(c_address)
     assert byte_item.parent_region == data_list
 
     word_item = data_list.instantiate(1)
     assert isinstance(word_item, Word)
     assert word_item.get_value() == 0x101
-    assert word_item.memory_base == c_address+1
+    assert int(word_item.memory_base) == int(c_address)+1
 
     dword_item = data_list.instantiate(2)
     assert isinstance(dword_item, Dword)
     assert dword_item.get_value() == 0x2020202
-    assert dword_item.memory_base == c_address+3
+    assert int(dword_item.memory_base) == int(c_address)+3
     print '[List.instantiate: PASS]'
 
     data_list.append_declaration(Declaration(base_class=Qword))
@@ -242,19 +243,19 @@ def test_List():
     qword_item = data_list.instantiate(3)
     assert isinstance(qword_item, Qword)
     assert qword_item.get_value() == 0x303030303030303
-    assert qword_item.memory_base == c_address+7
+    assert int(qword_item.memory_base) == int(c_address)+7
     print '[List.append_declaration: PASS]'
 
     data_list.remove_declaration(2)
     qword_item = data_list.instantiate(2)
     assert isinstance(qword_item, Qword)
-    assert qword_item.memory_base == c_address+3
+    assert int(qword_item.memory_base) == int(c_address)+3
     print '[List.remove_declaration: PASS]'
 
     data_list.insert_declaration(1, Declaration(base_class=Dword))
     dword_item = data_list.instantiate(1)
     assert isinstance(dword_item, Dword)
-    assert dword_item.memory_base == c_address+1
+    assert int(dword_item.memory_base) == int(c_address)+1
     assert data_list.declaration_offsets[2]['memory_offset'] == 5
     print '[List.insert_declaration: PASS]'
 
@@ -274,11 +275,11 @@ def test_List():
     array_object[0].set_value(0x42424242)
     assert array_object[0].get_value() == 0x42424242
 
-    ALLOCATOR.free(c_address)
+    c_buffer.free()
 
 def test_Array():
     c_buffer = ALLOCATOR.allocate(20)
-    c_address = c_buffer.address
+    c_address = c_buffer.address_object()
 
     # TODO what's the test-case for an array of bitfields?
     print '[test_Array]'
@@ -287,7 +288,7 @@ def test_Array():
                        ,memory_base=c_address)
 
     byte_object = byte_array.instantiate(5)
-    assert byte_object.memory_base == c_address+5
+    assert int(byte_object.memory_base) == int(c_address)+5
 
     byte_object.set_value(0x50)
     assert byte_array.instantiate(5).get_value() == 0x50
@@ -308,7 +309,7 @@ def test_Array():
     assert byte_array.instantiate(5).get_value() == 0x50
     print '[Array.static_size: PASS]'
 
-    ALLOCATOR.free(c_address)
+    c_buffer.free()
 
 def test_String():
     print '[test_String]'
@@ -322,6 +323,32 @@ def test_String():
     assert str(string_obj) == 'string data'
     string_obj.set_value('str data')
     assert str(string_obj) == 'str data'
+
+    print '[test_String] string_array'
+    string_array = Array(base_class=String
+                         ,elements=3)
+
+    string_array[1].set_value('second string')
+    assert string_array[1].elements == len('second string\x00')
+    assert string_array[1].get_value() == 'second string'
+
+    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base))
+    print '[test_String] string_array[0] (1)'
+    string_obj = string_array[0]
+    print '[test_String] set_value'
+    string_obj.set_value('first string')
+    print '[test_String] string_array[0] (2)'
+    new_string_obj = string_array[0]
+    print '[test_String] ctypes', hex(int(string_obj.memory_base)), ctypes.string_at(int(string_obj.memory_base), 64)
+    print '[test_String] ctypes', hex(int(string_array[0].memory_base)), ctypes.string_at(int(string_array[0].memory_base), 64)
+    assert int(string_obj.memory_base) == int(new_string_obj.memory_base)
+    assert string_array[0].get_value() == 'first string'
+    assert string_array[1].get_value() == 'second string'
+
+    assert string_array[1].memory_base == string_array[0].memory_base+len('first string\x00')
+
+    assert string_array[1].get_value() == 'second string'
+    assert string_array[0].get_value() == 'first string'
 
     print '[String: PASS]'
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-from . import declaration
-from . import list as d_list
+from paranoia.base import declaration
+from paranoia.meta import list as d_list
+from paranoia.converters import align
 
 class ArrayError(d_list.ListError):
     pass
@@ -14,10 +15,16 @@ class Array(d_list.List):
         self.base_class = kwargs.setdefault('base_class', self.BASE_CLASS)
         self.elements = kwargs.setdefault('elements', self.ELEMENTS)
 
+        string_data = kwargs.setdefault('string_data', self.STRING_DATA)
+
         if self.elements == 0:
             raise ArrayError('elements cannot be 0')
 
         kwargs['declarations'] = [declaration.Declaration(base_class=self.base_class) for i in xrange(self.elements)]
+
+        if not string_data is None and len(string_data) and self.elements == 0:
+            base_size = self.base_class.static_bitspan()
+            self.elements = align(len(string_data) / base_size, base_size) / base_size
 
         d_list.List.__init__(self, **kwargs)
 
@@ -31,13 +38,17 @@ class Array(d_list.List):
 
             for i in xrange(element_delta):
                 self.declarations.append(declaration.Declaration(base_class=self.base_class))
+                
             self.calculate_offsets(old_length)
-
+            
     def __setattr__(self, attr, value):
         if attr == 'elements':
             if self.__dict__.has_key('elements'):
                 old_value = self.__dict__['elements']
                 self.__dict__['elements'] = value
+
+                if self.__dict__.has_key('declaration') and not self.__dict__['declaration'] is None:
+                    self.__dict__['declaration'].set_arg('elements', value)
 
                 if not old_value == value:
                     self.parse_elements()

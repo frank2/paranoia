@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 
-from . import list as d_list
-from . import declaration
-from .. import memory_region
+from paranoia.meta import list as d_list
+from paranoia.base import declaration, memory_region
 
 class MappingError(d_list.ListError):
     pass
@@ -35,7 +34,7 @@ class Mapping(d_list.List):
             
             name, declaration_obj = pair
 
-            if declaration_obj.is_size_hint():
+            if d_list.is_size_hint(declaration_obj):
                 declaration_obj.args['my_declaration'] = i
                 size_hints.append(declaration_obj)
 
@@ -67,7 +66,8 @@ class Mapping(d_list.List):
             self.field_map[name] = index
 
         for hint in size_hints:
-            hint.args['target_declaration'] = self.field_map[hint.target_declaration()]
+            hint.set_arg('target_declaration'
+                         ,self.field_map[hint.get_arg('target_declaration')])
 
     def __getattr__(self, attr):
         if not self.__dict__.has_key('field_map') and not self.__dict__.has_key('anon_map') and not self.__dict__.has_key(attr):

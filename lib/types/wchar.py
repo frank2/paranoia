@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from paranoia.base import numeric_region
-from paranoia.base.abstract import array
+from paranoia.meta import array
 from . import word
 
 class WcharError(numeric_region.NumericRegionError):

@@ -3,7 +3,9 @@
 import ctypes
 
 from paranoia.base import allocator
+from paranoia.base import address
 from paranoia.base import paranoia_agent
+from paranoia.base import declaration
 from paranoia.converters import *
 
 class MemoryRegionError(paranoia_agent.ParanoiaError):
@@ -18,6 +20,7 @@ def sizeof(memory_region):
         raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
     
 class MemoryRegion(paranoia_agent.ParanoiaAgent):
+    DECLARATION = None
     BITSPAN = None
     MEMORY_BASE = None
     AUTO_ALLOCATE = True
@@ -33,6 +36,12 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
     def __init__(self, **kwargs):
         paranoia_agent.ParanoiaAgent.__init__(self)
+
+        # declaration must come first to properly attribute values
+        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
+
+        if not self.declaration is None and not isinstance(self.declaration, declaration.Declaration):
+            raise MemoryRegionError('declaration must implement Declaration')
 
         self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
@@ -76,12 +85,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         if self.memory_base is None:
             if self.auto_allocate:
-                self.allocation = self.allocator.allocate(self.shifted_bytespan())
-                self.memory_base = self.allocation.address
+                self.allocate()
             elif self.allocation:
-                self.memory_base = self.allocation.address
+                self.memory_base = self.allocation.address_object()
             else:
                 raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
+
+        if not self.memory_base is None and not isinstance(self.memory_base, address.Address):
+            raise MemoryRegionError('memory_base must be an Address object')
 
         if not string_data is None:
             self.write_bytes(map(ord, string_data))
@@ -107,7 +118,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
             raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
         
-        return ctypes.string_at(self.memory_base+byte_offset, byte_length)
+        return ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
     
     def read_bytes(self, byte_length, byte_offset=0):
         return map(ord, self.read_string(byte_length, byte_offset))
@@ -158,7 +169,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         string_buffer = ctypes.create_string_buffer(string_val)
         
-        ctypes.memmove(self.memory_base+byte_offset, ctypes.addressof(string_buffer), len(string_val))
+        ctypes.memmove(int(self.memory_base)+byte_offset, ctypes.addressof(string_buffer), len(string_val))
 
     def write_bytes(self, byte_list, byte_offset=0):
         return self.write_string(''.join(map(chr, byte_list)), byte_offset)
@@ -219,6 +230,16 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def write_bytes_from_bits(self, bit_list, byte_offset=0):
         self.write_bytes(bitlist_to_bytelist(bit_list), byte_offset)
 
+    def move_bits(self, bit_dest, bit_source, bit_length):
+        source_bits = self.read_bits(bit_length, bit_source)
+        self.write_bits(source_bits, bit_dest)
+        self.write_bits([0] * bit_length, bit_source)
+
+    def move_bytes(self, byte_dest, byte_source, byte_length):
+        source_bytes = self.read_bytes(byte_length, byte_source)
+        self.write_bytes(source_bytes, byte_length)
+        self.write_bytes([0] * byte_length, byte_source)
+
     def root_parent(self):
         root_parent = self
 
@@ -230,20 +251,32 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def is_allocated(self):
         return not self.allocation is None and isinstance(self.allocation, allocator.Allocation)
 
-    def reallocate(self, bitspan):
+    def allocate(self):
+        self.allocation = self.allocator.allocate(self.shifted_bytespan())
+        self.memory_base = self.allocation.address_object()
+
+    def reallocate(self):
+        #if not self.parent_region is None and self.parent_region.is_allocated():
+        #    return self.parent_region.reallocate()
+        
         if not self.is_allocated():
             raise MemoryRegionError('no allocation to resize')
 
-        aligned = (bitspan + self.bitshift, self.alignment) / 8
-        extra = int(aligned % 8 != 0)
-        new_bytespan = aligned + extra
+        shifted_bytespan = self.shifted_bytespan()
         
-        self.allocation.reallocate(new_bytespan)
-        self.memory_base = self.allocation.address
-        self.bitspan = bitspan
+        if self.allocation.size == shifted_bytespan:
+            return
+        
+        self.allocation.reallocate(self.shifted_bytespan())
 
     def __hash__(self):
-        return hash('%X/%d/%d' % (self.memory_base, self.bitspan, self.bitshift))
+        return hash('%X/%d/%d' % (int(self.memory_base), self.bitspan, self.bitshift))
+
+    def __setattr__(self, attr, value):
+        if self.__dict__.has_key('declaration') and not self.__dict__['declaration'] is None:
+            self.__dict__['declaration'].set_arg(attr, value)
+
+        paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)
 
     @classmethod
     def static_bitspan(cls, **kwargs):

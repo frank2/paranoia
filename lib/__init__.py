@@ -66,6 +66,7 @@ def concat_modules(package_name, package_locals, init_list, module_list):
     return results
 
 from . import base
+from . import meta
 from . import types
 from . import converters
 
@@ -73,5 +74,6 @@ __all__ = concat_modules(__name__
                          ,locals()
                          ,['.', 'module_enum', 'module_hash', 'concat_modules']
                          ,[base
+                           ,meta
                            ,types
                            ,converters])

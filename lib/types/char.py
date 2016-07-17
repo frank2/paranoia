@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 from paranoia.base import numeric_region
-from paranoia.base.abstract import array
-from . import byte
+from paranoia.meta import array
+from paranoia.types import byte
 
 class CharError(numeric_region.NumericRegionError):
     pass

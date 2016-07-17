@@ -52,3 +52,10 @@ def numeric_to_bitlist(numeric):
         numeric >>= 1
 
     return bitlist[::-1]
+
+def dict_merge(dict_one, dict_two):
+    for key in dict_two.keys():
+        if dict_one.has_key(key):
+            continue
+
+        dict_one[key] = dict_two[key]
