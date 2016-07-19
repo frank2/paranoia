@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import ctypes
+
 def aligned(base, alignment):
     return base % alignment == 0
 
@@ -59,3 +61,11 @@ def dict_merge(dict_one, dict_two):
             continue
 
         dict_one[key] = dict_two[key]
+
+def string_address(string):
+    # /!\ WARNING INCOMING HACK /!\
+    key = 'ADNU'
+    offset = ctypes.string_at(id(key), 256).index(key)
+    # /!\ WARNING INCOMING HACK /!\
+    
+    return id(string)+offset

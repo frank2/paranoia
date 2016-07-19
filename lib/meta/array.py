@@ -30,16 +30,19 @@ class Array(d_list.List):
 
     def parse_elements(self):
         if self.elements < len(self.declarations):
+            for i in range(self.elements, len(self.declarations)):
+                self.remove_declaration(self.elements, True)
+                           
             self.declarations = self.declarations[:self.elements]
-            self.calculate_offsets(len(self.declarations)) # truncate declaration_offsets
+            self.recalculate(len(self.declarations))
         elif self.elements > len(self.declarations):
             old_length = len(self.declarations)
             element_delta = self.elements - old_length
 
             for i in xrange(element_delta):
-                self.declarations.append(declaration.Declaration(base_class=self.base_class))
+                self.append_declaration(declaration.Declaration(base_class=self.base_class), True)
                 
-            self.calculate_offsets(old_length)
+            self.recalculate(old_length)
             
     def __setattr__(self, attr, value):
         if attr == 'elements':

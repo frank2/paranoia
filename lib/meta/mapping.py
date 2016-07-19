@@ -22,6 +22,7 @@ class Mapping(d_list.List):
 
     def parse_fields(self, fields):
         self.declarations = list()
+        self.declaration_map = dict()
         self.field_map = dict()
         self.anon_map = dict()
         size_hints = list()
@@ -33,6 +34,9 @@ class Mapping(d_list.List):
                 raise MappingError('field_declaration element must be a pair consisting of a string or None paired with a Declaration.')
             
             name, declaration_obj = pair
+            declaration_hash = hash(declaration_obj)
+
+            self.declaration_map[declaration_hash] = declaration_obj
 
             if d_list.is_size_hint(declaration_obj):
                 declaration_obj.args['my_declaration'] = i
@@ -57,16 +61,15 @@ class Mapping(d_list.List):
 
                     self.anon_map[anon_name] = name
                 
-            index = len(self.declarations)
             self.declarations.append(declaration_obj)
             
             if self.field_map.has_key(name):
                 raise StructureError('%s already defined in structure' % name)
 
-            self.field_map[name] = index
+            self.field_map[name] = declaration_hash
 
         for hint in size_hints:
-            hint.set_arg('target_declaration'
+            hint.set_arg('resolved_declaration'
                          ,self.field_map[hint.get_arg('target_declaration')])
 
     def __getattr__(self, attr):
@@ -77,8 +80,8 @@ class Mapping(d_list.List):
         anon_map = self.__dict__['anon_map']
 
         if field_map.has_key(attr):
-            index = field_map[attr]
-            return self.instantiate(index)
+            decl_hash = field_map[attr]
+            return self.instantiate(decl_hash)
         elif anon_map.has_key(attr):
             mapping = anon_map[attr]
 

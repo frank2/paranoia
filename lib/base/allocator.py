@@ -6,6 +6,7 @@ import traceback
 
 from paranoia.base import paranoia_agent
 from paranoia.base import address
+from paranoia.converters import string_address
 
 class AllocatorError(paranoia_agent.ParanoiaError):
     pass
@@ -22,6 +23,8 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             crt_module = cdll.msvcrt
         elif system == 'Linux' or system.startswith('CYGWIN'):
             crt_module = ctypes.cdll.LoadLibrary('libc.so.6')
+        elif system == 'Darwin':
+            crt_module = ctypes.cdll.LoadLibrary('libc.dylib')
         else:
             AllocatorError('unsupported platform %s' % system)
 
@@ -29,6 +32,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         self.crt_realloc = crt_module.realloc
         self.crt_free = crt_module.free
         self.crt_memset = crt_module.memset
+        self.crt_memmove = ctypes.memmove
         # do not import the crt version of memmove... for some reason it segfaults
             
         self.address_map = dict()
@@ -38,7 +42,6 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
-        print '[allocate]', hex(heap_address)
         self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
@@ -58,9 +61,6 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         return allocation
 
     def reallocate(self, address, size):
-        #print '===reallocate traceback==='
-        #print traceback.print_stack()
-        
         if not isinstance(address, (int, long)):
             raise AllocatorError('integer value not given for address')
 
@@ -72,9 +72,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
 
         allocation = self.address_map[address]
 
-        #print '[reallocate] before', hex(address)
         new_address = self.crt_realloc(address, size)
-        #print '[reallocate] after', hex(new_address)
         del self.address_map[address]
         self.address_map[new_address] = allocation
         
@@ -141,16 +139,16 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         
         self.allocator.free(self.address)
 
-    def read_string(self, size=None):
+    def read_string(self, size=None, offset=0):
         self.check_address()
         
         if size is None:
             size = self.size
 
-        if size > self.size:
+        if size+offset > self.size:
             raise AllocationError('size exceeds allocation size')
             
-        return ctypes.string_at(self.address, size)
+        return ctypes.string_at(self.address+offset, size)
 
     def read_bytes(self, size=None):
         self.check_address()
@@ -163,18 +161,16 @@ class Allocation(paranoia_agent.ParanoiaAgent):
 
         return map(ord, self.read_string(size))
 
-    def write_string(self, string):
+    def write_string(self, string, byte_offset=0):
         self.check_address()
         
         if not isinstance(string, basestring):
             raise AllocationError('string value not given')
 
-        if len(string) > self.size:
+        if len(string)+byte_offset > self.size:
             raise AllocationError('string would overflow allocation')
-        
-        c_string = ctypes.create_string_buffer(string)
-        c_address = ctypes.addressof(c_string)
-        self.allocator.crt_memmove(self.address, c_address, len(string))
+
+        self.allocator.crt_memmove(self.address+byte_offset, string_address(string), len(string))
 
     def write_bytes(self, byte_list):
         self.check_address()

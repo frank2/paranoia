@@ -7,6 +7,7 @@ from paranoia.base import address
 from paranoia.base import paranoia_agent
 from paranoia.base import declaration
 from paranoia.converters import *
+from paranoia.bitmanip import *
 
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
@@ -117,18 +118,24 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def read_string(self, byte_length, byte_offset=0):
         if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
             raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
-        
-        return ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
+
+        if self.allocation:
+            return self.allocation.read_string(byte_length, byte_offset)
+        else:
+            return ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
     
     def read_bytes(self, byte_length, byte_offset=0):
         return map(ord, self.read_string(byte_length, byte_offset))
 
-    def read_bytelist_for_bits(self, bit_length, bit_offset=0):
+    def read_bytelist_for_bits(self, bit_length, bit_offset=0, hinting=True):
         if bit_length + bit_offset > self.bitspan:
             raise MemoryRegionError('bit length and offset exceed bitspan')
 
         # true_offset represents where in the first byte to start reading bits
-        true_offset = self.bitshift + bit_offset
+        if hinting:
+            true_offset = self.bitshift + bit_offset
+        else:
+            true_offset = bit_offset
 
         # get the number of bytes necessary to grab our contextual bits
         byte_length = align(bit_length+(true_offset % 8), 8)/8
@@ -136,57 +143,68 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         # convert the bytes into a string of bits
         return self.read_bytes(byte_length, true_offset/8)
 
-    def read_bitlist_from_bytes(self, bit_length, bit_offset=0):
+    def read_bitlist_from_bytes(self, bit_length, bit_offset=0, hinting=True):
         if bit_length + bit_offset > self.bitspan:
             raise MemoryRegionError('bit length and offset exceed bitspan')
 
-        unconverted_bytes = self.read_bytelist_for_bits(bit_length, bit_offset)
+        unconverted_bytes = self.read_bytelist_for_bits(bit_length, bit_offset, hinting)
+        
         return ''.join(map('{0:08b}'.format, unconverted_bytes))
 
-    def read_bits_from_bytes(self, bit_length, bit_offset=0):
+    def read_bits_from_bytes(self, bit_length, bit_offset=0, hinting=True):
         # take only the contextual bits based on the bit_length
         if bit_length + bit_offset > self.bitspan:
             raise MemoryRegionError('bit length and offset exceed bitspan')
 
         # true_offset represents where in the first byte to start reading bits
-        true_offset = self.bitshift + bit_offset
+
+        if hinting:
+            true_offset = self.bitshift + (bit_offset % 8)
+            start_index = self.bitshift
+        else:
+            true_offset = bit_offset % 8
 
         converted_bytes = self.read_bitlist_from_bytes(bit_length, bit_offset)
+
         return map(int, converted_bytes)[true_offset:bit_length+true_offset]
 
-    def read_bits(self, bit_length=None, bit_offset=0):
+    def read_bits(self, bit_length=None, bit_offset=0, hinting=True):
         if not bit_length:
             bit_length = self.bitspan
-            
-        return self.read_bits_from_bytes(bit_length, bit_offset)
 
-    def read_bytes_from_bits(self, bit_length, bit_offset=0):
-        return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset))
+        return self.read_bits_from_bytes(bit_length, bit_offset, hinting)
+
+    def read_bytes_from_bits(self, bit_length, bit_offset=0, hinting=True):
+        return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
 
     def write_string(self, string_val, byte_offset=0):
         if (len(string_val)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
 
-        string_buffer = ctypes.create_string_buffer(string_val)
-        
-        ctypes.memmove(int(self.memory_base)+byte_offset, ctypes.addressof(string_buffer), len(string_val))
+        if self.allocation:
+            self.allocation.write_string(string_val, byte_offset)
+        else:
+            ctypes.memmove(int(self.memory_base)+byte_offset, string_address(string_val), len(string_val))
 
     def write_bytes(self, byte_list, byte_offset=0):
         return self.write_string(''.join(map(chr, byte_list)), byte_offset)
 
-    def write_bits(self, bit_list, bit_offset=0):
+    def write_bits(self, bit_list, bit_offset=0, hinting=True):
         if len(bit_list) + bit_offset > self.bitspan:
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
 
-        true_offset = self.bitshift + bit_offset
+        if hinting:
+            true_offset = self.bitshift + bit_offset
+        else:
+            true_offset = bit_offset
+            
         true_terminus = true_offset + len(bit_list)
         byte_start = true_offset/8
         byte_end = true_terminus/8
 
         # value represents the number of bits which overwrite the underlying byte
-
         if byte_start == byte_end:
-            single_shift = ((8 - len(bit_list)) - true_offset)
+            single_shift = ((8 - len(bit_list)) - true_offset % 8)
             value_mask = ((2 ** len(bit_list)) - 1) << single_shift
             underlying_mask = 0xFF ^ value_mask
             underlying_value = self.read_bytes(1, byte_start)[0]
@@ -224,21 +242,21 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         bytebound_list = bitlist_to_bytelist(bytebound_list)
         self.write_bytes(bytebound_list, byte_start)
 
-    def write_bits_from_bytes(self, byte_list, bit_offset=0):
-        self.write_bits(bytelist_to_bitlist(byte_list), bit_offset)
+    def write_bits_from_bytes(self, byte_list, bit_offset=0, hinting=True):
+        self.write_bits(bytelist_to_bitlist(byte_list), bit_offset, hinting)
 
     def write_bytes_from_bits(self, bit_list, byte_offset=0):
         self.write_bytes(bitlist_to_bytelist(bit_list), byte_offset)
 
-    def move_bits(self, bit_dest, bit_source, bit_length):
-        source_bits = self.read_bits(bit_length, bit_source)
-        self.write_bits(source_bits, bit_dest)
-        self.write_bits([0] * bit_length, bit_source)
+    def move_bits(self, offset_dest, offset_source, length):
+        bitlist = self.read_bits(length, offset_source, False)
+        self.write_bits([0] * length, offset_source, False)
+        self.write_bits(bitlist, offset_dest, False)
 
-    def move_bytes(self, byte_dest, byte_source, byte_length):
-        source_bytes = self.read_bytes(byte_length, byte_source)
-        self.write_bytes(source_bytes, byte_length)
-        self.write_bytes([0] * byte_length, byte_source)
+    def move_bytes(self, offset_dest, offset_source, length):
+        bytelist = self.read_bytes(length, offset_source)
+        self.write_bytes([0] * len(bytelist), offset_source)
+        self.write_bytes(bytelist, offset_dest)
 
     def root_parent(self):
         root_parent = self
@@ -249,18 +267,18 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return root_parent
 
     def is_allocated(self):
-        return not self.allocation is None and isinstance(self.allocation, allocator.Allocation)
+        return not self.allocation is None
 
     def allocate(self):
         self.allocation = self.allocator.allocate(self.shifted_bytespan())
         self.memory_base = self.allocation.address_object()
 
     def reallocate(self):
-        #if not self.parent_region is None and self.parent_region.is_allocated():
-        #    return self.parent_region.reallocate()
+        if not self.parent_region is None:
+            return self.parent_region.reallocate()
         
         if not self.is_allocated():
-            raise MemoryRegionError('no allocation to resize')
+            return
 
         shifted_bytespan = self.shifted_bytespan()
         

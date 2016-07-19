@@ -215,11 +215,12 @@ def test_List():
     data_list = List(declarations=[Declaration(base_class=Byte)
                                    ,Declaration(base_class=Word)
                                    ,Declaration(base_class=Dword)]
-                         ,memory_base=c_address)
+                     ,memory_base=c_address
+                     ,allocation=c_buffer)
     
-    assert data_list.declaration_offsets[0]['memory_offset'] == 0
-    assert data_list.declaration_offsets[1]['memory_offset'] == 1
-    assert data_list.declaration_offsets[2]['memory_offset'] == 3
+    assert data_list.declaration_offsets[hash(data_list.declarations[0])]['memory_offset'] == 0
+    assert data_list.declaration_offsets[hash(data_list.declarations[1])]['memory_offset'] == 1
+    assert data_list.declaration_offsets[hash(data_list.declarations[2])]['memory_offset'] == 3
 
     byte_item = data_list.instantiate(0)
     assert isinstance(byte_item, Byte)
@@ -229,6 +230,7 @@ def test_List():
 
     word_item = data_list.instantiate(1)
     assert isinstance(word_item, Word)
+    print map(hex, map(ord, ctypes.string_at(int(word_item.memory_base), 32)))
     assert word_item.get_value() == 0x101
     assert int(word_item.memory_base) == int(c_address)+1
 
@@ -239,7 +241,7 @@ def test_List():
     print '[List.instantiate: PASS]'
 
     data_list.append_declaration(Declaration(base_class=Qword))
-    assert data_list.declaration_offsets[3]['memory_offset'] == 7
+    assert data_list.declaration_offsets[hash(data_list.declarations[3])]['memory_offset'] == 7
     qword_item = data_list.instantiate(3)
     assert isinstance(qword_item, Qword)
     assert qword_item.get_value() == 0x303030303030303
@@ -256,22 +258,23 @@ def test_List():
     dword_item = data_list.instantiate(1)
     assert isinstance(dword_item, Dword)
     assert int(dword_item.memory_base) == int(c_address)+1
-    assert data_list.declaration_offsets[2]['memory_offset'] == 5
+    assert data_list.declaration_offsets[hash(data_list.declarations[2])]['memory_offset'] == 5
     print '[List.insert_declaration: PASS]'
 
-    data_list.append_declaration(Declaration(base_class=SizeHint
-                                             ,args={'target_declaration': 5
-                                                    ,'argument': 'elements'
-                                                    ,'bitspan': 8}))
-    data_list.append_declaration(Declaration(base_class=Array
-                                             ,args={'base_class': Dword}))
-    hint_object = data_list.instantiate(4)
+    print '[test_List] pre append_declarations = %d' % data_list.bitspan
+    data_list.append_declarations([Declaration(base_class=SizeHint
+                                               ,args={'target_declaration': 5
+                                                      ,'argument': 'elements'
+                                                      ,'bitspan': 8})
+                                  ,Declaration(base_class=Array
+                                               ,args={'base_class': Dword})])
+    print '[test_List] post append_declarations = %d' % data_list.bitspan
 
-    assert hint_object.my_declaration == 4
-    hint_object.set_value(1)
+    hint_object = data_list.instantiate(4)
+    hint_object.set_value(2)
 
     array_object = data_list.instantiate(5)
-    assert array_object.bitspan == 32
+    assert array_object.bitspan == 64
     array_object[0].set_value(0x42424242)
     assert array_object[0].get_value() == 0x42424242
 
@@ -285,7 +288,8 @@ def test_Array():
     print '[test_Array]'
     byte_array = Array(base_class=Byte
                        ,elements=20
-                       ,memory_base=c_address)
+                       ,memory_base=c_address
+                       ,allocation=c_buffer)
 
     byte_object = byte_array.instantiate(5)
     assert int(byte_object.memory_base) == int(c_address)+5
@@ -330,25 +334,29 @@ def test_String():
 
     string_array[1].set_value('second string')
     assert string_array[1].elements == len('second string\x00')
+    assert string_array.shifted_bytespan() == len('\x00second string\x00\x00')
     assert string_array[1].get_value() == 'second string'
 
-    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base))
+    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base)), ctypes.string_at(int(string_array.memory_base), 64)
     print '[test_String] string_array[0] (1)'
     string_obj = string_array[0]
     print '[test_String] set_value'
+    print '====='
+    print 'dat delta'
+    print '====='
     string_obj.set_value('first string')
+    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base)), ctypes.string_at(int(string_array.memory_base), 64)
     print '[test_String] string_array[0] (2)'
     new_string_obj = string_array[0]
     print '[test_String] ctypes', hex(int(string_obj.memory_base)), ctypes.string_at(int(string_obj.memory_base), 64)
     print '[test_String] ctypes', hex(int(string_array[0].memory_base)), ctypes.string_at(int(string_array[0].memory_base), 64)
     assert int(string_obj.memory_base) == int(new_string_obj.memory_base)
+    address = int(string_array[0].memory_base)
+    print '[test_String]', ctypes.string_at(address, 64)
     assert string_array[0].get_value() == 'first string'
     assert string_array[1].get_value() == 'second string'
 
-    assert string_array[1].memory_base == string_array[0].memory_base+len('first string\x00')
-
-    assert string_array[1].get_value() == 'second string'
-    assert string_array[0].get_value() == 'first string'
+    assert int(string_array[1].memory_base) == int(string_array[0].memory_base)+len('first string\x00')
 
     print '[String: PASS]'
 
@@ -386,7 +394,7 @@ def test_Structure():
 
     struct_size = structure_class.static_bitspan() / 8
     c_buffer = ALLOCATOR.allocate(struct_size)
-    c_address = c_buffer.address
+    c_address = c_buffer.address_object()
     structure_instance = structure_class(memory_base=c_address)
 
     assert isinstance(structure_instance.word_obj, Word)
@@ -412,7 +420,7 @@ def test_Structure():
     assert structure_instance.array_obj[0].get_value() == 0x44
     assert structure_instance.bitfield_1.bitshift == 0
     assert structure_instance.bitfield_2.bitshift == 2
-    assert structure_instance.bitfield_1.memory_base == structure_instance.bitfield_2.memory_base
+    assert int(structure_instance.bitfield_1.memory_base) == int(structure_instance.bitfield_2.memory_base)
     
     bitfield_1.set_value(1)
     assert structure_instance.bitfield_1.get_value() == 1
@@ -504,17 +512,17 @@ def test_Pointer():
     pointer_32 = pointer_class.cast(Dword)()
     pointer_64 = pointer_class.cast(Qword)()
 
-    pointer_32.set_value(dword_obj.memory_base)
+    pointer_32.set_value(int(dword_obj.memory_base))
     assert pointer_32.deref().get_value() == 0x32323232
 
-    pointer_64.set_value(qword_obj.memory_base)
+    pointer_64.set_value(int(qword_obj.memory_base))
     assert pointer_64.deref().get_value() == 0x6464646464646464
 
     assert pointer_64.read_pointed_bytes(4) == [0x64, 0x64, 0x64, 0x64]
     pointer_64.write_pointed_bytes([0x32]*4, 4)
     assert int(pointer_64.deref()) == 0x3232323264646464
 
-    array_pointer_front = pointer_class.cast(Dword)(value=dword_array.memory_base)
+    array_pointer_front = pointer_class.cast(Dword)(value=int(dword_array.memory_base))
     array_pointer_middle = array_pointer_front + 10
 
     assert array_pointer_front.deref().get_value() == 0x21212121
