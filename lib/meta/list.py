@@ -350,6 +350,15 @@ class List(memory_region.MemoryRegion):
 
         return instance
 
+    def read_memory(self):
+        bitlist = list()
+
+        for i in xrange(len(self.declarations)):
+            instance = self.instantiate(i)
+            bitlist += instance.read_bits(instance.bitspan)
+
+        return ''.join(map(chr, bitlist_to_bytelist(bitlist)))
+
     def __getitem__(self, index):
         return self.instantiate(index)
     

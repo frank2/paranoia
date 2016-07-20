@@ -371,7 +371,7 @@ def test_Structure():
         ,('byte_obj', Byte)])
 
     structure_class = Structure.simple([
-        ('byte_obj', Byte)
+        ('byte_obj', Byte, {'value': 0x40})
         ,('word_obj', Word, {'value': 0x505})
         ,('dword_obj', Dword)
         ,('qword_obj', Qword)
@@ -397,6 +397,8 @@ def test_Structure():
     c_address = c_buffer.address_object()
     structure_instance = structure_class(memory_base=c_address)
 
+    assert isinstance(structure_instance.byte_obj, Byte)
+    assert structure_instance.byte_obj.get_value() == 0x40
     assert isinstance(structure_instance.word_obj, Word)
     assert structure_instance.word_obj.get_value() == 0x505
 
