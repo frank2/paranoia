@@ -7,7 +7,6 @@ from paranoia.base import address
 from paranoia.base import paranoia_agent
 from paranoia.base import declaration
 from paranoia.converters import *
-from paranoia.bitmanip import *
 
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass

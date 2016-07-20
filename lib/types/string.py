@@ -97,11 +97,11 @@ class String(Array):
 
     @classmethod
     def static_declaration(cls, **kwargs):
-        kwargs.setdefault('bound', cls.BOUND)
+        kwargs.setdefault('bind', cls.BIND)
 
         super_class = super(String, cls).static_declaration(**kwargs)
 
         class StaticString(super_class):
-            BOUND = kwargs['bound']
+            BIND = kwargs['bind']
 
         return StaticString
