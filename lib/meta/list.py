@@ -364,7 +364,9 @@ class List(memory_region.MemoryRegion):
     
     @classmethod
     def static_bitspan(cls, **kwargs):
-        if not cls.DECLARATIONS:
+        declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
+        
+        if not declarations:
             raise ListError('no static declarations to parse bitspan from')
 
         memory_base = kwargs.setdefault('memory_base', cls.MEMORY_BASE)
@@ -375,12 +377,12 @@ class List(memory_region.MemoryRegion):
         declaration_offsets = dict()
         hint_map = dict()
 
-        for i in xrange(len(cls.DECLARATIONS)):
-            declaration = cls.DECLARATIONS[i]
+        for i in xrange(len(declarations)):
+            declaration = declarations[i]
 
             if not memory_base is None and hint_map.has_key(i):
                 hint_dict = hint_map[i]
-                hint_declaration = cls.DECLARATIONS[hint_dict['index']]
+                hint_declaration = declarations[hint_dict['index']]
                 del hint_dict['index']
                 hint_instance = hint_declaration.instantiate(**hint_dict)
                 declaration.set_arg(hint_instance.argument, hint_instance.get_value())
