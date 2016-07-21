@@ -76,6 +76,11 @@ class NumericRegion(memory_region.MemoryRegion):
 
         value &= (2 ** self.bitspan) - 1
 
+        # we never actually wind up setting value in the declaration args, so
+        # do it manually here
+        if not self.declaration is None:
+            self.declaration.set_arg('value', value)
+
         if self.alignment == self.ALIGN_BYTE:
             while bitspan > 0:
                 bytelist.append(value & 0xFF)
