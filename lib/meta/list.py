@@ -10,8 +10,9 @@ class ListError(paranoia_agent.ParanoiaError):
     pass
 
 class List(memory_region.MemoryRegion):
-    BIND = True
     DECLARATIONS = None
+    BIND = True
+    COPY_DECLARATIONS = True
 
     def __init__(self, **kwargs):
         # yank necessary MemoryRegion args from the kwargs
@@ -22,6 +23,8 @@ class List(memory_region.MemoryRegion):
 
         self.bind = kwargs.setdefault('bind', self.BIND)
         self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
+
+        copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
 
         if self.declarations is None:
             self.declarations = list()
@@ -38,6 +41,10 @@ class List(memory_region.MemoryRegion):
             if not isinstance(declaration_obj, declaration.Declaration):
                 raise ListError('declaration at offset %d is not a Declaration object' % i)
 
+            if copy_declarations:
+                declaration_obj = declaration_obj.copy()
+                self.declarations[i] = declaration_obj
+                
             self.declaration_map[hash(declaration_obj)] = declaration_obj
 
         self.declaration_offsets = dict()

@@ -50,3 +50,9 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
     def set_arg(self, arg, value):
         self.args[arg] = value
+
+    def copy(self):
+        copied = Declaration(base_class=self.base_class
+                             ,args=dict(self.args.items()[:]))
+
+        return copied

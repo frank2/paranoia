@@ -15,12 +15,15 @@ class Mapping(d_list.List):
         if fields is None or not getattr(fields, '__iter__', None):
             raise StructureError('fields must be a sequence of names and DataDeclarations')
 
-        self.parse_fields(fields)
+        copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
+
+        self.parse_fields(fields, copy_declarations)
         kwargs['declarations'] = self.declarations # for initializing bitspan
+        kwargs['copy_declarations'] = False # already done
 
         d_list.List.__init__(self, **kwargs)
 
-    def parse_fields(self, fields):
+    def parse_fields(self, fields, copy_declarations):
         self.declarations = list()
         self.declaration_map = dict()
         self.field_map = dict()
@@ -34,12 +37,13 @@ class Mapping(d_list.List):
                 raise MappingError('field_declaration element must be a pair consisting of a string or None paired with a Declaration.')
             
             name, declaration_obj = pair
+
+            if copy_declarations:
+                declaration_obj = declaration_obj.copy()
+                
             declaration_hash = hash(declaration_obj)
 
-            self.declaration_map[declaration_hash] = declaration_obj
-
             if d_list.is_size_hint(declaration_obj):
-                declaration_obj.args['my_declaration'] = i
                 size_hints.append(declaration_obj)
 
             if name == None:
