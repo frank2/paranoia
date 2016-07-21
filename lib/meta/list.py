@@ -20,11 +20,9 @@ class List(memory_region.MemoryRegion):
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
-
-        self.bind = kwargs.setdefault('bind', self.BIND)
+        self.copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
+        self.bind = kwargs.setdefault('bind', self.BIND)        
         self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
-
-        copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
 
         if self.declarations is None:
             self.declarations = list()
@@ -32,21 +30,9 @@ class List(memory_region.MemoryRegion):
         if not isinstance(self.declarations, list):
             raise ListError('declarations must be a list of Declaration objects')
 
-        self.declaration_map = dict()
+        self.map_declarations()
+
         self.recalculating = False
-        
-        for i in xrange(len(self.declarations)):
-            declaration_obj = self.declarations[i]
-
-            if not isinstance(declaration_obj, declaration.Declaration):
-                raise ListError('declaration at offset %d is not a Declaration object' % i)
-
-            if copy_declarations:
-                declaration_obj = declaration_obj.copy()
-                self.declarations[i] = declaration_obj
-                
-            self.declaration_map[hash(declaration_obj)] = declaration_obj
-
         self.declaration_offsets = dict()
         self.previous_offsets = dict()
         self.deltas = dict()
@@ -65,6 +51,22 @@ class List(memory_region.MemoryRegion):
 
         # recalculate and reallocate
         self.recalculate()
+
+    def map_declarations(self):
+        self.declaration_map = dict()
+        
+        for i in range(len(self.declarations)):
+            decl_obj = self.declarations[i]
+
+            if not isinstance(decl_obj, declaration.Declaration):
+                raise ListError('declaration object is not a Declaration')
+
+            if self.copy_declarations:
+                decl_obj = decl_obj.copy()
+                self.declarations[i] = decl_obj
+
+            decl_hash = hash(decl_obj)
+            self.declaration_map[decl_hash] = decl_obj
 
     def map_hint(self, index):
         declaration_obj = self.declarations[index]
