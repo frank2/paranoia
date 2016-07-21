@@ -36,10 +36,11 @@ class String(Array):
         return str(self)
 
     def set_value(self, string):
+        limit = len(string)
+        
         if self.bind and len(string) > self.elements-int(self.zero_terminated):
             limit = self.elements-int(self.zero_terminated)
         elif not self.bind:
-            limit = len(string)
             self.elements = limit+int(self.zero_terminated)
 
         for i in xrange(limit):
