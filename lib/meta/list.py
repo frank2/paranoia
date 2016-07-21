@@ -30,6 +30,7 @@ class List(memory_region.MemoryRegion):
             raise ListError('declarations must be a list of Declaration objects')
 
         self.declaration_map = dict()
+        self.recalculating = False
         
         for i in xrange(len(self.declarations)):
             declaration_obj = self.declarations[i]
@@ -226,6 +227,11 @@ class List(memory_region.MemoryRegion):
                 self.move_bits(delta_pos, previous_pos, previous['bitspan'])
                 
     def recalculate(self, start_from=0):
+        # this prevents recursion loops in instantiated size hints
+        if self.recalculating:
+            return
+
+        self.recalculating = True
         self.calculate_offsets(start_from)
         self.calculate_deltas()
 
@@ -242,6 +248,8 @@ class List(memory_region.MemoryRegion):
         self.reallocate()
 
         self.move_positive_deltas()
+
+        self.recalculating = False
 
     def append_declaration(self, declaration, skip_recalc=False):
         self.insert_declaration(len(self.declarations), declaration, skip_recalc)
