@@ -12,14 +12,20 @@ class StringError(ArrayError):
 
 class String(Array):
     BIND = False
+    ZERO_TERMINATED = True
     BASE_CLASS = Char
     ELEMENTS = 1 # there's always, at least, a null byte
 
     def __init__(self, **kwargs):
         string_data = kwargs.setdefault('string_data', self.STRING_DATA)
+        self.zero_terminated = kwargs.setdefault('zero_terminated', self.ZERO_TERMINATED)
+        self.bind = kwargs.setdefault('bind', self.BIND)
 
-        if not string_data is None:
-            self.elements = len(string_data)+1
+        if not self.bind and not self.zero_terminated:
+            raise StringError('cannot have an unbound string with no zero termination')
+
+        if not string_data is None and not self.bind:
+            self.elements = len(string_data)+int(self.zero_terminated)
         
         Array.__init__(self, **kwargs)
 
@@ -30,20 +36,20 @@ class String(Array):
         return str(self)
 
     def set_value(self, string):
-        limit = len(string)
-
-        if self.bind and len(string) > self.elements-1:
-            limit = self.elements-1
+        if self.bind and len(string) > self.elements-int(self.zero_terminated):
+            limit = self.elements-int(self.zero_terminated)
         elif not self.bind:
-            self.elements = limit+1
+            limit = len(string)
+            self.elements = limit+int(self.zero_terminated)
 
         for i in xrange(limit):
             self[i].set_char_value(string[i])
 
-        self[limit].set_value(0)
+        if self.zero_terminated:
+            self[limit].set_value(0)
 
     def __str__(self):
-        if not self.bind:
+        if not self.bind and self.zero_terminated:
             self.elements = self.__class__.string_size_from_memory(memory_base=self.memory_base)
         
         result = str()
@@ -55,7 +61,7 @@ class String(Array):
 
             char_obj = self[index]
 
-            if int(char_obj) == 0:
+            if self.zero_terminated and int(char_obj) == 0:
                 break
             
             index += 1
