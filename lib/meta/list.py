@@ -383,7 +383,7 @@ class List(memory_region.MemoryRegion):
     def static_bitspan(cls, **kwargs):
         declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
         
-        if not declarations:
+        if declarations is None:
             raise ListError('no static declarations to parse bitspan from')
 
         memory_base = kwargs.setdefault('memory_base', cls.MEMORY_BASE)
