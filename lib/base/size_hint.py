@@ -43,6 +43,7 @@ class SizeHint(numeric_region.NumericRegion):
                 raise SizeHintError('no declaration found with hash 0x%x' % self.resolved_declaration)
         
             declaration_map[self.resolved_declaration].set_arg(self.argument, self.get_value())
+            decl_hash = hash(declaration_map[self.resolved_declaration])
         else:
             declarations = getattr(self.parent_region, 'declarations', None)
 
@@ -53,7 +54,13 @@ class SizeHint(numeric_region.NumericRegion):
                 raise SizeHintError('target declaration out of bounds')
         
             declarations[self.target_declaration].set_arg(self.argument, self.get_value())
+            decl_hash = hash(declarations[self.target_declaration])
 
+        instance_map = getattr(self.parent_region, 'instance_map', None)
+
+        if not instance_map is None and instance_map.has_key(decl_hash):
+            instance_map[decl_hash].invalidated = True
+            del instance_map[decl_hash]
 
     def set_value(self, value):
         numeric_region.NumericRegion.set_value(self, value)

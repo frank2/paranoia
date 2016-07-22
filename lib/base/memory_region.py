@@ -29,6 +29,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     ALLOCATOR_CLASS = allocator.Allocator
     ALLOCATOR = None
     STRING_DATA = None
+    INVALIDATED = False
     BITSHIFT = 0
     ALIGNMENT = 8
     ALIGN_BIT = 1
@@ -51,6 +52,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
         self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
+        self.invalidated = kwargs.setdefault('invalidated', self.INVALIDATED)
         self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
         
         string_data = kwargs.setdefault('string_data', self.STRING_DATA)
@@ -115,6 +117,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return bytecount + extra
 
     def read_string(self, byte_length, byte_offset=0):
+        if self.invalidated:
+            raise MemoryRegionError('memory region has been invalidated')
+        
         if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
             raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
 
@@ -177,6 +182,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
 
     def write_string(self, string_val, byte_offset=0):
+        if self.invalidated:
+            raise MemoryRegionError('memory region has been invalidated')
+        
         if (len(string_val)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
 

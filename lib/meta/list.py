@@ -37,6 +37,7 @@ class List(memory_region.MemoryRegion):
         self.previous_offsets = dict()
         self.deltas = dict()
         self.hint_map = dict()
+        self.instance_map = dict()
         
         if kwargs.has_key('string_data') and not kwargs['string_data'] is None:
             # if string data is present, use that as the length and calculate
@@ -206,12 +207,26 @@ class List(memory_region.MemoryRegion):
             if not self.deltas.has_key(decl_hash):
                 continue
 
-            if self.deltas[decl_hash] < 0:
-                previous = self.previous_offsets[decl_hash]
-                previous_pos = previous['memory_offset'] * 8 + previous['bitshift']
-                delta_pos = previous_pos + self.deltas[decl_hash]
+            if self.deltas[decl_hash] >= 0:
+                continue
+            
+            previous = self.previous_offsets[decl_hash]
+            previous_pos = previous['memory_offset'] * 8 + previous['bitshift']
+            delta_pos = previous_pos + self.deltas[decl_hash]
 
-                self.move_bits(delta_pos, previous_pos, previous['bitspan'])
+            self.move_bits(delta_pos, previous_pos, previous['bitspan'])
+
+            if not self.instance_map.has_key(decl_hash):
+                continue
+            
+            instance = self.instance_map[decl_hash]
+            offsets = self.declaration_offsets[decl_hash]
+                    
+            instance.memory_base = self.memory_base.fork(offsets['memory_offset'])
+            instance.bitshift = offsets['bitshift']
+
+            if isinstance(instance, List):
+                instance.reset_instances()
 
     def move_positive_deltas(self):
         memory_base = getattr(self, 'memory_base', None)
@@ -226,14 +241,26 @@ class List(memory_region.MemoryRegion):
             if not self.deltas.has_key(decl_hash):
                 continue
             
-            if self.deltas[decl_hash] > 0:
-                previous = self.previous_offsets[decl_hash]
-                previous_pos = previous['memory_offset'] * 8 + previous['bitshift']
-                delta_pos = previous_pos + self.deltas[decl_hash]
+            if self.deltas[decl_hash] <= 0:
+                continue
+            
+            previous = self.previous_offsets[decl_hash]
+            previous_pos = previous['memory_offset'] * 8 + previous['bitshift']
+            delta_pos = previous_pos + self.deltas[decl_hash]
+            
+            self.move_bits(delta_pos, previous_pos, previous['bitspan'])
+            
+            if not self.instance_map.has_key(decl_hash):
+                continue
+            
+            instance = self.instance_map[decl_hash]
+            current = self.declaration_offsets[decl_hash]
+                    
+            instance.memory_base = self.memory_base.fork(current['memory_offset'])
+            instance.bitshift = current['bitshift']
 
-                import ctypes
-                
-                self.move_bits(delta_pos, previous_pos, previous['bitspan'])
+            if isinstance(instance, List):
+                instance.reset_instances()
                 
     def recalculate(self, start_from=0):
         # this prevents recursion loops in instantiated size hints
@@ -260,6 +287,17 @@ class List(memory_region.MemoryRegion):
 
         self.recalculating = False
 
+    def reset_instances(self):
+        for decl_hash in self.instance_map.keys():
+            instance = self.instance_map[decl_hash]
+            offsets = self.declaration_offsets[decl_hash]
+
+            instance.memory_base = self.memory_base.fork(offsets['memory_offset'])
+            instance.bitshift = offsets['bitshift']
+
+            if isinstance(instance, List):
+                instance.reset_instances()
+            
     def append_declaration(self, declaration, skip_recalc=False):
         self.insert_declaration(len(self.declarations), declaration, skip_recalc)
 
@@ -335,6 +373,9 @@ class List(memory_region.MemoryRegion):
                 
             del self.hint_map[resolved_decl]
 
+        if self.instance_map.has_key(declaration_hash):
+            del self.instance_map[declaration_hash]
+
         if skip_recalc:
             return
 
@@ -355,6 +396,9 @@ class List(memory_region.MemoryRegion):
 
             decl_hash = hash(self.declarations[index])
 
+        if self.instance_map.has_key(decl_hash):
+            return self.instance_map[decl_hash]
+
         if not self.declaration_offsets.has_key(decl_hash):
             raise ListError('offset for declaration not parsed')
         
@@ -364,6 +408,8 @@ class List(memory_region.MemoryRegion):
         instance = self.declaration_map[decl_hash].instantiate(memory_base=memory_base
                                                                ,bitshift=bitshift
                                                                ,parent_region=self)
+
+        self.instance_map[decl_hash] = instance
 
         return instance
 

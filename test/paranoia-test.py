@@ -337,26 +337,10 @@ def test_String():
     assert string_array.shifted_bytespan() == len('\x00second string\x00\x00')
     assert string_array[1].get_value() == 'second string'
 
-    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base)), ctypes.string_at(int(string_array.memory_base), 64)
-    print '[test_String] string_array[0] (1)'
-    string_obj = string_array[0]
-    print '[test_String] set_value'
-    print '====='
-    print 'dat delta'
-    print '====='
-    string_obj.set_value('first string')
-    print '[test_String] string_array.memory_base', hex(int(string_array.memory_base)), ctypes.string_at(int(string_array.memory_base), 64)
-    print '[test_String] string_array[0] (2)'
-    new_string_obj = string_array[0]
-    print '[test_String] ctypes', hex(int(string_obj.memory_base)), ctypes.string_at(int(string_obj.memory_base), 64)
-    print '[test_String] ctypes', hex(int(string_array[0].memory_base)), ctypes.string_at(int(string_array[0].memory_base), 64)
-    assert int(string_obj.memory_base) == int(new_string_obj.memory_base)
-    address = int(string_array[0].memory_base)
-    print '[test_String]', ctypes.string_at(address, 64)
+    string_array[0].set_value('first string')
     assert string_array[0].get_value() == 'first string'
-    assert string_array[1].get_value() == 'second string'
-
     assert int(string_array[1].memory_base) == int(string_array[0].memory_base)+len('first string\x00')
+    assert string_array[1].get_value() == 'second string'
 
     print '[String: PASS]'
 
