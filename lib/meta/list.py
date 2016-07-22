@@ -417,7 +417,13 @@ class List(memory_region.MemoryRegion):
         bitlist = list()
 
         for i in xrange(len(self.declarations)):
-            instance = self.instantiate(i)
+            decl_hash = hash(self.declarations[i])
+
+            if self.instance_map.has_key(decl_hash):
+                instance = self.instance_map[decl_hash]
+            else:
+                instance = self.instantiate(decl_hash)
+                
             bitlist += instance.read_bits(instance.bitspan)
 
         return ''.join(map(chr, bitlist_to_bytelist(bitlist)))
