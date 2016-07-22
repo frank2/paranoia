@@ -388,7 +388,7 @@ class List(memory_region.MemoryRegion):
         if self.declaration_map.has_key(index):
             decl_hash = index
         else:
-            if abs(index) > len(self.declarations):
+            if abs(index) >= len(self.declarations):
                 raise ListError('index out of range')
 
             if index < 0:
