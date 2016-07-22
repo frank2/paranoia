@@ -57,7 +57,7 @@ class String(Array):
         index = 0
 
         while 1:
-            if self.bind and index > self.elements:
+            if self.bind and index >= self.elements:
                 break
 
             char_obj = self[index]
