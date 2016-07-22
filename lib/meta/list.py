@@ -486,7 +486,7 @@ class List(memory_region.MemoryRegion):
             
             bitspan += new_bitspan
 
-            if not memory_base is None and declaration.is_size_hint():
+            if not memory_base is None and is_size_hint(declaration):
                 hint_dict = {'memory_base': memory_base.fork(offset_dict['memory_offset'])
                              ,'bitshift': offset_dict['bitshift']
                              ,'index': i}
