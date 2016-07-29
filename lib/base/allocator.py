@@ -31,6 +31,8 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             AllocatorError('unsupported platform %s' % system)
 
         self.crt_malloc = crt_module.malloc
+        # malloc shouldn't return a signed int
+        self.crt_malloc.restype = ctypes.c_void_p
         self.crt_realloc = crt_module.realloc
         self.crt_free = crt_module.free
         self.crt_memset = ctypes.memset
@@ -45,13 +47,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
-        # for some reason memset segfaults on some systems in threads... so do it
-        # manually with a python hack and memmove
-        zero_mem = '\x00' * byte_length
-        zero_address = string_address(zero_mem)
-        print '[allocate] heap_address =', hex(heap_address)
-        print '[allocate] zero_address =', hex(zero_address)
-        self.crt_memmove(heap_address, zero_address, byte_length)
+        self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
         self.address_map[heap_address] = allocation
