@@ -33,7 +33,8 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         self.crt_malloc = crt_module.malloc
         self.crt_realloc = crt_module.realloc
         self.crt_free = crt_module.free
-        self.crt_memset = crt_module.memset
+        self.crt_memset = ctypes.memset
+        # do not import the crt version of memset... it segfaults too.
         self.crt_memmove = ctypes.memmove
         # do not import the crt version of memmove... for some reason it segfaults
             
