@@ -45,7 +45,11 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
-        self.crt_memset(heap_address, 0, byte_length)
+        # for some reason memset segfaults on some systems in threads... so do it
+        # manually with a python hack and memmove
+        zero_mem = '\x00' * byte_length
+        zero_address = string_address(zero_mem)
+        self.crt_memmove(heap_address, zero_address, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
         self.address_map[heap_address] = allocation
