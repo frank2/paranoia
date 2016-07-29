@@ -49,6 +49,8 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         # manually with a python hack and memmove
         zero_mem = '\x00' * byte_length
         zero_address = string_address(zero_mem)
+        print '[allocate] heap_address =', hex(heap_address)
+        print '[allocate] zero_address =', hex(zero_address)
         self.crt_memmove(heap_address, zero_address, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
