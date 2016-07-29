@@ -34,6 +34,8 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         # malloc shouldn't return a signed int
         self.crt_malloc.restype = ctypes.c_void_p
         self.crt_realloc = crt_module.realloc
+        # neither should realloc
+        self.crt_realloc.restype = ctypes.c_void_p
         self.crt_free = crt_module.free
         self.crt_memset = ctypes.memset
         # do not import the crt version of memset... it segfaults too.
