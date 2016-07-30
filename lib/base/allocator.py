@@ -49,6 +49,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
+        print '[allocate] heap_address =', hex(heap_address)
         self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
@@ -79,6 +80,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
 
         allocation = self.address_map[address]
 
+        print '[reallocate] address =', hex(address)
         new_address = self.crt_realloc(address, size)
         del self.address_map[address]
         self.address_map[new_address] = allocation
