@@ -30,17 +30,21 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         else:
             AllocatorError('unsupported platform %s' % system)
 
+        # HERE'S THE PART WHERE I CLEAN UP AFTER CTYPES' MESS
         self.crt_malloc = crt_module.malloc
-        # malloc shouldn't return a signed int
         self.crt_malloc.restype = ctypes.c_void_p
+        self.crt_malloc.argtypes = (ctypes.c_size_t,)
+        
         self.crt_realloc = crt_module.realloc
-        # neither should realloc
         self.crt_realloc.restype = ctypes.c_void_p
+        self.crt_realloc.argtypes = (ctypes.c_void_p, ctypes.c_size_t)
+
         self.crt_free = crt_module.free
+        self.crt_free.argtypes = (ctypes.c_void_p,)
+
+        # HERE'S THE PART WHERE CTYPES MAYBE KINDA HELPS
         self.crt_memset = ctypes.memset
-        # do not import the crt version of memset... it segfaults too.
         self.crt_memmove = ctypes.memmove
-        # do not import the crt version of memmove... for some reason it segfaults
             
         self.address_map = dict()
 
@@ -49,7 +53,6 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
-        print '[allocate] heap_address =', hex(heap_address)
         self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
@@ -79,8 +82,6 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
-
-        print '[reallocate] address =', hex(address)
         new_address = self.crt_realloc(address, size)
         del self.address_map[address]
         self.address_map[new_address] = allocation
