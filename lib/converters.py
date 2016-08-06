@@ -2,6 +2,9 @@
 
 import ctypes
 
+__all__ = ['aligned', 'alignment_delta', 'align', 'bitlist_to_bytelist', 'bytelist_to_bitlist'
+           ,'bitlist_to_numeric', 'numeric_to_bitlist', 'dict_merge', 'string_address']
+
 def aligned(base, alignment):
     return base % alignment == 0
 
@@ -16,7 +19,7 @@ def bitlist_to_bytelist(bitlist):
     bytelist = list()
     byte_value = 0
     
-    for i in xrange(len(bitlist)):
+    for i in range(len(bitlist)):
         if i % 8 == 0 and not i == 0:
             byte_value = 0
 
@@ -34,14 +37,14 @@ def bitlist_to_bytelist(bitlist):
     return bytelist[::-1]
 
 def bytelist_to_bitlist(bytelist):
-    return map(int, ''.join(map('{0:08b}'.format, bytelist)))
+    return list(map(int, ''.join(map('{0:08b}'.format, bytelist))))
 
 def bitlist_to_numeric(bitlist):
     bitlist = bitlist[::-1]
 
     byte_value = 0
 
-    for i in xrange(len(bitlist)):
+    for i in range(len(bitlist)):
         byte_value |= bitlist[i] << i
 
     return byte_value
@@ -56,8 +59,8 @@ def numeric_to_bitlist(numeric):
     return bitlist[::-1]
 
 def dict_merge(dict_one, dict_two):
-    for key in dict_two.keys():
-        if dict_one.has_key(key):
+    for key in list(dict_two.keys()):
+        if key in dict_one:
             continue
 
         dict_one[key] = dict_two[key]

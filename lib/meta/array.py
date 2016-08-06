@@ -4,6 +4,8 @@ from paranoia.base import declaration
 from paranoia.meta import list as d_list
 from paranoia.converters import align
 
+__all__ = ['ArrayError', 'Array']
+
 class ArrayError(d_list.ListError):
     pass
 
@@ -20,7 +22,7 @@ class Array(d_list.List):
         if self.elements == 0:
             raise ArrayError('elements cannot be 0')
 
-        kwargs['declarations'] = [declaration.Declaration(base_class=self.base_class) for i in xrange(self.elements)]
+        kwargs['declarations'] = [declaration.Declaration(base_class=self.base_class) for i in range(self.elements)]
 
         if not string_data is None and len(string_data) and self.elements == 0:
             base_size = self.base_class.static_bitspan()
@@ -39,18 +41,18 @@ class Array(d_list.List):
             old_length = len(self.declarations)
             element_delta = self.elements - old_length
 
-            for i in xrange(element_delta):
+            for i in range(element_delta):
                 self.append_declaration(declaration.Declaration(base_class=self.base_class), True)
                 
             self.recalculate(old_length)
             
     def __setattr__(self, attr, value):
         if attr == 'elements':
-            if self.__dict__.has_key('elements'):
+            if 'elements' in self.__dict__:
                 old_value = self.__dict__['elements']
                 self.__dict__['elements'] = value
 
-                if self.__dict__.has_key('declaration') and not self.__dict__['declaration'] is None:
+                if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
                     self.__dict__['declaration'].set_arg('elements', value)
 
                 if not old_value == value:
@@ -84,7 +86,7 @@ class Array(d_list.List):
         kwargs.setdefault('elements', cls.ELEMENTS)
 
         if not kwargs['base_class'] is None and kwargs['elements'] > 0:
-            kwargs['declarations'] = [declaration.Declaration(base_class=kwargs['base_class']) for i in xrange(kwargs['elements'])]
+            kwargs['declarations'] = [declaration.Declaration(base_class=kwargs['base_class']) for i in range(kwargs['elements'])]
 
         super_class = super(Array, cls).static_declaration(**kwargs)
 

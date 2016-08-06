@@ -3,6 +3,8 @@
 from paranoia.base import paranoia_agent
 from paranoia.converters import dict_merge
 
+__all__ = ['DeclarationError', 'Declaration']
+
 class DeclarationError(paranoia_agent.ParanoiaError):
     pass
 
@@ -31,19 +33,19 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         return self.base_class(**kwargs)
 
     def bitspan(self, **kwargs):
-        if not self.args.has_key('bitspan'):
+        if 'bitspan' not in self.args:
             return self.base_class.static_bitspan(**self.args)
 
         return self.args['bitspan']
 
     def alignment(self):
-        if not self.args.has_key('alignment'):
+        if 'alignment' not in self.args:
             return self.base_class.static_alignment()
 
         return self.args['alignment']
 
     def get_arg(self, arg):
-        if not self.args.has_key(arg):
+        if arg not in self.args:
             return getattr(self.base_class, arg.upper(), None)
 
         return self.args[arg]
@@ -53,6 +55,6 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
     def copy(self):
         copied = Declaration(base_class=self.base_class
-                             ,args=dict(self.args.items()[:]))
+                             ,args=dict(list(self.args.items())[:]))
 
         return copied

@@ -3,6 +3,8 @@
 from paranoia.base import memory_region
 from paranoia.converters import *
 
+__all__ = ['NumericRegionError', 'NumericRegion']
+
 class NumericRegionError(memory_region.MemoryRegionError):
     pass
 
@@ -47,7 +49,7 @@ class NumericRegion(memory_region.MemoryRegion):
             if self.endianness == NumericRegion.LITTLE_ENDIAN:
                 bitspan_content = bitspan_content[::-1]
 
-            for i in xrange(len(bitspan_content)):
+            for i in range(len(bitspan_content)):
                 value <<= 8
                 value |= bitspan_content[i]
         elif self.alignment == self.ALIGN_BIT:

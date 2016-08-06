@@ -2,6 +2,8 @@
 
 from paranoia.meta import mapping
 
+__all__ = ['UnionError', 'Union']
+
 class UnionError(mapping.MappingError):
     pass
 
@@ -9,7 +11,7 @@ class Union(mapping.Mapping):
     def calculate_offsets(self, start_from=0):
         self.declaration_offsets = dict()
         
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             declaration = self.declarations[i]
             declaration_hash = hash(declaration)
             offset_dict = dict()
@@ -26,7 +28,7 @@ class Union(mapping.Mapping):
     def calculate_length(self):
         longest_object = 0
         
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             decl = self.declarations[i]
             decl_hash = hash(decl)
             decl_bitspan = self.declaration_offsets[decl_hash]['bitspan']
@@ -38,4 +40,4 @@ class Union(mapping.Mapping):
 
     @classmethod
     def static_bitspan(cls, **kwargs):
-        return max(map(lambda x: x[1].bitspan(), kwargs.setdefault('fields', cls.FIELDS)))
+        return max([x[1].bitspan() for x in kwargs.setdefault('fields', cls.FIELDS)])

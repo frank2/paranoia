@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
-from . import array
-from . import list
-from . import mapping
-from paranoia import concat_modules
+from paranoia.meta import array
+from paranoia.meta import list
+from paranoia.meta import mapping
 
-__all__ = concat_modules(__name__
-                         ,locals()
-                         ,['.']
-                         ,[array
-                           ,list
-                           ,mapping])
+from paranoia.meta.array import *
+from paranoia.meta.list import *
+from paranoia.meta.mapping import *
+
+__all__ = ['array', 'list', 'mapping'] + \
+          array.__all__ + \
+          list.__all__ + \
+          mapping.__all__

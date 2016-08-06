@@ -6,6 +6,9 @@ from paranoia.base import paranoia_agent
 from paranoia.types.bitfield import Bitfield
 from paranoia.types.structure import Structure
 
+__all__ = ['FloatError', 'FloatStub', 'FloatStruct', 'Float', 'DoubleStruct', 'Double'
+           ,'LongDoubleStruct', 'LongDouble', 'DoubleDoubleStruct', 'DoubleDouble']
+
 class FloatError(paranoia_agent.ParanoiaError):
     pass
 
@@ -55,7 +58,7 @@ class FloatStub(object):
             rhs_bin = list()
             bitspan = self.fraction.bitspan
 
-            for i in xrange(bitspan):
+            for i in range(bitspan):
                 rhs *= 2
                 base_two = int(math.floor(rhs))
 
@@ -88,7 +91,7 @@ class FloatStub(object):
 
         fraction = 0
 
-        for i in xrange(len(mantissa)):
+        for i in range(len(mantissa)):
             fraction <<= 1
             fraction |= mantissa[i]
 
@@ -118,7 +121,7 @@ class FloatStub(object):
         
         result = 0
 
-        for i in xrange(len(fraction_list)):
+        for i in range(len(fraction_list)):
             if fraction_list[i] == 0:
                 continue
 

@@ -8,6 +8,8 @@ from paranoia.base import paranoia_agent
 from paranoia.base import address
 from paranoia.converters import string_address
 
+__all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation']
+
 class AllocatorError(paranoia_agent.ParanoiaError):
     pass
 
@@ -49,7 +51,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         self.address_map = dict()
 
     def allocate(self, byte_length):
-        if not isinstance(byte_length, (int, long)):
+        if not isinstance(byte_length, int):
             raise AllocatorError('integer value not given')
 
         heap_address = self.crt_malloc(byte_length)
@@ -61,7 +63,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         return allocation
 
     def allocate_string(self, string):
-        if not isinstance(string, basestring):
+        if not isinstance(string, str):
             raise AllocatorError('string value not given')
 
         c_string = ctypes.create_string_buffer(string)
@@ -72,13 +74,13 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         return allocation
 
     def reallocate(self, address, size):
-        if not isinstance(address, (int, long)):
+        if not isinstance(address, int):
             raise AllocatorError('integer value not given for address')
 
-        if not isinstance(address, (int, long)):
+        if not isinstance(address, int):
             raise AllocatorError('integer value not given for address')
 
-        if not self.address_map.has_key(address):
+        if address not in self.address_map:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
@@ -92,7 +94,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         return allocation
 
     def free(self, address):
-        if not self.address_map.has_key(address):
+        if address not in self.address_map:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         self.crt_free(address)
@@ -102,7 +104,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         del self.address_map[address]
 
     def __del__(self):
-        for address in self.address_map.keys():
+        for address in list(self.address_map.keys()):
             self.free(address)
 
 class Allocation(paranoia_agent.ParanoiaAgent):
@@ -122,9 +124,9 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         if self.allocator is None:
             raise AllocationError('allocator cannot be None')
 
-        if not isinstance(self.address, (int, long)):
+        if not isinstance(self.address, int):
             raise AllocationError('address must be an integer')
-        if not isinstance(self.size, (int, long)):
+        if not isinstance(self.size, int):
             raise AllocationError('size must be an integer')
         if not isinstance(self.allocator, Allocator):
             raise AllocationError('allocator must be an Allocator instance')
@@ -169,12 +171,12 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         if size > self.size:
             raise AllocationError('size exceeds allocation size')
 
-        return map(ord, self.read_string(size))
+        return list(map(ord, self.read_string(size)))
 
     def write_string(self, string, byte_offset=0):
         self.check_address()
         
-        if not isinstance(string, basestring):
+        if not isinstance(string, str):
             raise AllocationError('string value not given')
 
         if len(string)+byte_offset > self.size:

@@ -3,6 +3,8 @@
 from paranoia.base import declaration, memory_region, size_hint, paranoia_agent
 from paranoia.converters import *
 
+__all__ = ['is_size_hint', 'ListError', 'List']
+
 def is_size_hint(decl):
     return issubclass(decl.base_class, size_hint.SizeHint)
 
@@ -39,7 +41,7 @@ class List(memory_region.MemoryRegion):
         self.hint_map = dict()
         self.instance_map = dict()
         
-        if kwargs.has_key('string_data') and not kwargs['string_data'] is None:
+        if 'string_data' in kwargs and not kwargs['string_data'] is None:
             # if string data is present, use that as the length and calculate
             # offsets with memory hints afterward
             kwargs['bitspan'] = len(kwargs['string_data'])*8
@@ -80,13 +82,13 @@ class List(memory_region.MemoryRegion):
         target_decl = declaration_obj.get_arg('target_declaration')
 
         if not resolved_decl is None:
-            if not self.declaration_map.has_key(resolved_decl):
+            if resolved_decl not in self.declaration_map:
                 raise ListError('no such declaration with hash %x', resolved_decl)
         else:
             if target_decl is None:
                 raise ListError('size hint has no target declaration')
 
-            if isinstance(target_decl, basestring):
+            if isinstance(target_decl, str):
                 raise ListError('list cannot resolve strings')
 
             if target_decl >= len(self.declarations):
@@ -99,14 +101,12 @@ class List(memory_region.MemoryRegion):
     def calculate_offsets(self, start_from=0):
         if isinstance(start_from, declaration.Declaration):
             start_from = self.declarations.index(start_from)
-        elif not isinstance(start_from, (int, long)):
+        elif not isinstance(start_from, int):
             raise ListError('start_from must be an int, long or Declaration')
             
         declarative_length = len(self.declarations)
-        self.previous_offsets = dict(self.declaration_offsets.items()[:])
-        self.hint_map = dict(filter(
-            lambda x: x[0] < declarative_length
-            ,self.hint_map.items()))
+        self.previous_offsets = dict(list(self.declaration_offsets.items())[:])
+        self.hint_map = dict([x for x in list(self.hint_map.items()) if x[0] < declarative_length])
 
         memory_base = getattr(self, 'memory_base', None)
 
@@ -116,7 +116,7 @@ class List(memory_region.MemoryRegion):
 
             if is_size_hint(declaration_obj):
                 self.map_hint(i)
-            elif not memory_base is None and self.hint_map.has_key(declaration_hash):
+            elif not memory_base is None and declaration_hash in self.hint_map:
                 hint_hash = self.hint_map[declaration_hash]
                 hint_object = self.instantiate(hint_hash)
                 hint_object.set_declaration()
@@ -156,14 +156,14 @@ class List(memory_region.MemoryRegion):
     def calculate_deltas(self, start_from=0):
         if isinstance(start_from, declaration.Declaration):
             start_from = self.declarations.index(start_from)
-        elif not isinstance(start_from, (int, long)):
+        elif not isinstance(start_from, int):
             raise ListError('start_from must be an int, long or Declaration')
 
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             decl = self.declarations[i]
             decl_hash = hash(decl)
 
-            if not self.previous_offsets.has_key(decl_hash):
+            if decl_hash not in self.previous_offsets:
                 continue
 
             current = self.declaration_offsets[decl_hash]
@@ -177,7 +177,7 @@ class List(memory_region.MemoryRegion):
     def calculate_length(self):
         list_bitspan = 0
         
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             current = self.declaration_offsets[hash(self.declarations[i])]
 
             if i+1 >= len(self.declarations):
@@ -200,11 +200,11 @@ class List(memory_region.MemoryRegion):
         if memory_base is None:
             return
         
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             decl = self.declarations[i]
             decl_hash = hash(decl)
 
-            if not self.deltas.has_key(decl_hash):
+            if decl_hash not in self.deltas:
                 continue
 
             if self.deltas[decl_hash] >= 0:
@@ -216,7 +216,7 @@ class List(memory_region.MemoryRegion):
 
             self.move_bits(delta_pos, previous_pos, previous['bitspan'])
 
-            if not self.instance_map.has_key(decl_hash):
+            if decl_hash not in self.instance_map:
                 continue
             
             instance = self.instance_map[decl_hash]
@@ -238,7 +238,7 @@ class List(memory_region.MemoryRegion):
             decl = self.declarations[i]
             decl_hash = hash(decl)
 
-            if not self.deltas.has_key(decl_hash):
+            if decl_hash not in self.deltas:
                 continue
             
             if self.deltas[decl_hash] <= 0:
@@ -250,7 +250,7 @@ class List(memory_region.MemoryRegion):
             
             self.move_bits(delta_pos, previous_pos, previous['bitspan'])
             
-            if not self.instance_map.has_key(decl_hash):
+            if decl_hash not in self.instance_map:
                 continue
             
             instance = self.instance_map[decl_hash]
@@ -288,7 +288,7 @@ class List(memory_region.MemoryRegion):
         self.recalculating = False
 
     def reset_instances(self):
-        for decl_hash in self.instance_map.keys():
+        for decl_hash in list(self.instance_map.keys()):
             instance = self.instance_map[decl_hash]
             offsets = self.declaration_offsets[decl_hash]
 
@@ -357,13 +357,13 @@ class List(memory_region.MemoryRegion):
             target_decl = declaration_obj.get_arg('target_declaration')
 
             if not resolved_decl is None:
-                if not self.hint_map.has_key(resolved_decl):
+                if resolved_decl not in self.hint_map:
                     raise ListError('no such hint with hash %x' % resolved_decl)
             else:
                 if target_decl is None:
                     raise ListError('size hint has no target')
 
-                if isinstance(target_decl, basestring):
+                if isinstance(target_decl, str):
                     raise ListError('list cannot resolve strings')
 
                 if target_decl >= len(self.declarations):
@@ -373,7 +373,7 @@ class List(memory_region.MemoryRegion):
                 
             del self.hint_map[resolved_decl]
 
-        if self.instance_map.has_key(declaration_hash):
+        if declaration_hash in self.instance_map:
             del self.instance_map[declaration_hash]
 
         if skip_recalc:
@@ -385,7 +385,7 @@ class List(memory_region.MemoryRegion):
             self.recalculate(index-1)
 
     def instantiate(self, index):
-        if self.declaration_map.has_key(index):
+        if index in self.declaration_map:
             decl_hash = index
         else:
             if abs(index) >= len(self.declarations):
@@ -396,10 +396,10 @@ class List(memory_region.MemoryRegion):
 
             decl_hash = hash(self.declarations[index])
 
-        if self.instance_map.has_key(decl_hash):
+        if decl_hash in self.instance_map:
             return self.instance_map[decl_hash]
 
-        if not self.declaration_offsets.has_key(decl_hash):
+        if decl_hash not in self.declaration_offsets:
             raise ListError('offset for declaration not parsed')
         
         memory_base = self.memory_base.fork(self.declaration_offsets[decl_hash]['memory_offset'])
@@ -416,10 +416,10 @@ class List(memory_region.MemoryRegion):
     def read_memory(self):
         bitlist = list()
 
-        for i in xrange(len(self.declarations)):
+        for i in range(len(self.declarations)):
             decl_hash = hash(self.declarations[i])
 
-            if self.instance_map.has_key(decl_hash):
+            if decl_hash in self.instance_map:
                 instance = self.instance_map[decl_hash]
             else:
                 instance = self.instantiate(decl_hash)
@@ -446,10 +446,10 @@ class List(memory_region.MemoryRegion):
         declaration_offsets = dict()
         hint_map = dict()
 
-        for i in xrange(len(declarations)):
+        for i in range(len(declarations)):
             declaration = declarations[i]
 
-            if not memory_base is None and hint_map.has_key(i):
+            if not memory_base is None and i in hint_map:
                 hint_dict = hint_map[i]
                 hint_declaration = declarations[hint_dict['index']]
                 del hint_dict['index']

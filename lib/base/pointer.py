@@ -2,6 +2,8 @@
 
 from paranoia.base import address, memory_region, numeric_region
 
+__all__ = ['PointerError', 'Pointer', 'Pointer32', 'Pointer64']
+
 class PointerError(numeric_region.NumericRegionError):
     pass
 

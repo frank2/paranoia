@@ -7,6 +7,8 @@ from paranoia.base.memory_region import sizeof
 from paranoia.types.char import Char
 from paranoia.types.wchar import Wchar
 
+__all__ = ['StringError', 'String']
+
 class StringError(ArrayError):
     pass
 
@@ -43,7 +45,7 @@ class String(Array):
         elif not self.bind:
             self.elements = limit+int(self.zero_terminated)
 
-        for i in xrange(limit):
+        for i in range(limit):
             self[i].set_char_value(string[i])
 
         if self.zero_terminated:

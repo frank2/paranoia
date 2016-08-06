@@ -2,6 +2,8 @@
 
 from paranoia.base import paranoia_agent
 
+__all__ = ['AddressError', 'Address']
+
 class AddressError(paranoia_agent.ParanoiaError):
     pass
 
@@ -13,7 +15,7 @@ class Address(paranoia_agent.ParanoiaAgent):
         self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
         self.offset = kwargs.setdefault('offset', self.OFFSET)
 
-        if not isinstance(self.offset, (int, long)):
+        if not isinstance(self.offset, int):
             raise AddressError('offset must be an int or a long')
 
     def value(self):

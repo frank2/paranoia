@@ -5,6 +5,8 @@
 
 from paranoia.meta import mapping
 
+__all__ = ['StructureError', 'Structure']
+
 class StructureError(mapping.MappingError):
     pass
 

@@ -8,6 +8,8 @@ from paranoia.base import paranoia_agent
 from paranoia.base import declaration
 from paranoia.converters import *
 
+__all__ = ['MemoryRegionError', 'sizeof', 'MemoryRegion']
+
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
 
@@ -57,7 +59,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         
         string_data = kwargs.setdefault('string_data', self.STRING_DATA)
 
-        if not string_data is None and not isinstance(string_data, basestring):
+        if not string_data is None and not isinstance(string_data, str):
             raise MemoryRegionError('string_data must be a string')
 
         if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
@@ -97,7 +99,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('memory_base must be an Address object')
 
         if not string_data is None:
-            self.write_bytes(map(ord, string_data))
+            self.write_bytes(list(map(ord, string_data)))
 
     def bytespan(self):
         aligned = align(self.bitspan, self.alignment)
@@ -129,7 +131,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             return ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
     
     def read_bytes(self, byte_length, byte_offset=0):
-        return map(ord, self.read_string(byte_length, byte_offset))
+        return list(map(ord, self.read_string(byte_length, byte_offset)))
 
     def read_bytelist_for_bits(self, bit_length, bit_offset=0, hinting=True):
         if bit_length + bit_offset > self.bitspan:
@@ -298,7 +300,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return hash('%X/%d/%d' % (int(self.memory_base), self.bitspan, self.bitshift))
 
     def __setattr__(self, attr, value):
-        if self.__dict__.has_key('declaration') and not self.__dict__['declaration'] is None:
+        if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
             self.__dict__['declaration'].set_arg(attr, value)
 
         paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)

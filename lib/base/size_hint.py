@@ -2,6 +2,8 @@
 
 from paranoia.base import numeric_region
 
+__all__ = ['SizeHintError', 'SizeHint']
+
 class SizeHintError(numeric_region.NumericRegionError):
     pass
 
@@ -21,13 +23,13 @@ class SizeHint(numeric_region.NumericRegion):
         if self.argument is None:
             raise SizeHintError('argument not set')
 
-        if not isinstance(self.target_declaration, (int, long, basestring)):
+        if not isinstance(self.target_declaration, (int, str)):
             raise SizeHintError('target_declaration not an int, long or string')
 
-        if not self.resolved_declaration is None and not isinstance(self.resolved_declaration, (int, long)):
+        if not self.resolved_declaration is None and not isinstance(self.resolved_declaration, int):
             raise SizeHintError('resolved_declaration must be a hash of a declaration')
 
-        if not isinstance(self.argument, basestring):
+        if not isinstance(self.argument, str):
             raise SizeHintError('argument not a string')
 
         numeric_region.NumericRegion.__init__(self, **kwargs)
@@ -39,7 +41,7 @@ class SizeHint(numeric_region.NumericRegion):
             if not declaration_map:
                 raise SizeHintError('parent_region has no declaration map')
 
-            if not declaration_map.has_key(self.resolved_declaration):
+            if self.resolved_declaration not in declaration_map:
                 raise SizeHintError('no declaration found with hash 0x%x' % self.resolved_declaration)
         
             declaration_map[self.resolved_declaration].set_arg(self.argument, self.get_value())
@@ -58,7 +60,7 @@ class SizeHint(numeric_region.NumericRegion):
 
         instance_map = getattr(self.parent_region, 'instance_map', None)
 
-        if not instance_map is None and instance_map.has_key(decl_hash):
+        if not instance_map is None and decl_hash in instance_map:
             instance_map[decl_hash].invalidated = True
             del instance_map[decl_hash]
 
@@ -73,7 +75,7 @@ class SizeHint(numeric_region.NumericRegion):
             recalculate(self.declaration)
 
     def resolve(self, resolution=None):
-        if isinstance(self.target_declaration, basestring):
+        if isinstance(self.target_declaration, str):
             if resolution is None:
                 raise SizeHintError('cannot resolve string without resolution')
 

@@ -4,6 +4,8 @@ from paranoia.base import numeric_region
 from paranoia.meta import array
 from paranoia.types import byte
 
+__all__ = ['CharError', 'Char', 'CharArray']
+
 class CharError(numeric_region.NumericRegionError):
     pass
 
@@ -12,7 +14,7 @@ class Char(byte.Byte):
         return chr(self.get_value())
 
     def set_char_value(self, char):
-        if not isinstance(char, basestring):
+        if not isinstance(char, str):
             raise CharError('input value must be a string')
 
         if len(char) > 1:
