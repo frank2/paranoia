@@ -4,6 +4,11 @@ import platform
 import ctypes
 import traceback
 
+try:
+    import __builtin__
+except ImportError: # python3
+    import builtins as __builtin__
+
 from paranoia.base import paranoia_agent
 from paranoia.base import address
 from paranoia.converters import string_address
@@ -51,45 +56,76 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         self.address_map = dict()
 
     def allocate(self, byte_length):
-        if not isinstance(byte_length, int):
+        long = getattr(__builtin__, 'long', None)
+
+        if long is None: # python3
+            long = int
+            
+        if not isinstance(byte_length, (int, long)):
             raise AllocatorError('integer value not given')
 
-        heap_address = self.crt_malloc(byte_length)
+        heap_buffer = ctypes.create_string_buffer(byte_length)
+        heap_address = ctypes.addressof(heap_buffer)
         self.crt_memset(heap_address, 0, byte_length)
         
-        allocation = Allocation(address=heap_address, size=byte_length, allocator=self)
+        allocation = Allocation(address=heap_address
+                                ,buffer=heap_buffer
+                                ,size=byte_length
+                                ,allocator=self)
+        
         self.address_map[heap_address] = allocation
 
         return allocation
 
-    def allocate_string(self, string):
-        if not isinstance(string, str):
+    def allocate_string(self, string, encoding='ascii'):
+        unicode = getattr(__builtin__, 'unicode', None)
+
+        if unicode is None: # python 3
+            unicode = str
+            
+        if not isinstance(string, (str, unicode)):
             raise AllocatorError('string value not given')
 
+        try:
+            string = bytes(string)
+        except TypeError: # python3
+            string = bytes(string, encoding)
+            
         c_string = ctypes.create_string_buffer(string)
         c_address = ctypes.addressof(c_string)
         allocation = self.allocate(len(string)+1)
-        ctypes.memmove(allocation.address, c_address, len(string))
+        ctypes.memset(allocation.address, 0, allocation.size) 
+        ctypes.memmove(allocation.address, c_address, allocation.size-1)
 
         return allocation
 
     def reallocate(self, address, size):
-        if not isinstance(address, int):
-            raise AllocatorError('integer value not given for address')
+        long = getattr(__builtin__, 'long', None)
 
-        if not isinstance(address, int):
+        if long is None: # python 3
+            long = int
+        
+        if not isinstance(address, (int, long)):
             raise AllocatorError('integer value not given for address')
 
         if address not in self.address_map:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
-        new_address = self.crt_realloc(address, size)
+        new_buffer = ctypes.create_string_buffer(size)
+        new_address = ctypes.addressof(new_buffer)
+        
+        self.crt_memset(new_address, 0, size)
+        self.crt_memmove(new_address, allocation.address, allocation.size)
+
+        allocation.address = new_address
+        del allocation.buffer
+        allocation.buffer = new_buffer
+
+        allocation.size = size
+
         del self.address_map[address]
         self.address_map[new_address] = allocation
-        
-        allocation.address = new_address
-        allocation.size = size
 
         return allocation
 
@@ -97,10 +133,12 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         if address not in self.address_map:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
-        self.crt_free(address)
         allocation = self.address_map[address]
         allocation.address = 0
         allocation.size = 0
+        del allocation.buffer
+        allocation.buffer = None
+        
         del self.address_map[address]
 
     def __del__(self):
@@ -109,11 +147,18 @@ class Allocator(paranoia_agent.ParanoiaAgent):
 
 class Allocation(paranoia_agent.ParanoiaAgent):
     ADDRESS = None
+    BUFFER = None
     SIZE = None
     ALLOCATOR = None
     
     def __init__(self, **kwargs):
+        long = getattr(__builtin__, 'long', None)
+
+        if long is None: # python 3
+            long = int
+            
         self.address = kwargs.setdefault('address', self.ADDRESS)
+        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
         self.size = kwargs.setdefault('size', self.SIZE)
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
 
@@ -124,9 +169,9 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         if self.allocator is None:
             raise AllocationError('allocator cannot be None')
 
-        if not isinstance(self.address, int):
+        if not isinstance(self.address, (int, long)):
             raise AllocationError('address must be an integer')
-        if not isinstance(self.size, int):
+        if not isinstance(self.size, (int, long)):
             raise AllocationError('size must be an integer')
         if not isinstance(self.allocator, Allocator):
             raise AllocationError('allocator must be an Allocator instance')
@@ -151,7 +196,7 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         
         self.allocator.free(self.address)
 
-    def read_string(self, size=None, offset=0):
+    def read_bytestring(self, size=None, offset=0):
         self.check_address()
         
         if size is None:
@@ -159,10 +204,14 @@ class Allocation(paranoia_agent.ParanoiaAgent):
 
         if size+offset > self.size:
             raise AllocationError('size exceeds allocation size')
-            
-        return ctypes.string_at(self.address+offset, size)
 
-    def read_bytes(self, size=None):
+        address_read = ctypes.string_at(self.address+offset, size)
+        return bytearray(address_read)
+
+    def read_string(self, size=None, offset=0, encoding='ascii'):
+        return self.read_bytestring(size, offset).decode(encoding)
+
+    def read_bytes(self, size=None, offset=0):
         self.check_address()
         
         if size is None:
@@ -173,24 +222,30 @@ class Allocation(paranoia_agent.ParanoiaAgent):
 
         return list(map(ord, self.read_string(size)))
 
-    def write_string(self, string, byte_offset=0):
+    def write_bytestring(self, string, byte_offset=0):
         self.check_address()
         
-        if not isinstance(string, str):
-            raise AllocationError('string value not given')
+        if not isinstance(string, (bytes, bytearray)):
+            raise AllocationError('string or byte array value not given')
 
         if len(string)+byte_offset > self.size:
             raise AllocationError('string would overflow allocation')
 
-        self.allocator.crt_memmove(self.address+byte_offset, string_address(string), len(string))
+        string_bytes = bytes(string)
+        string_buffer = ctypes.create_string_buffer(string_bytes)
+        string_address = ctypes.addressof(string_buffer)
+        self.allocator.crt_memmove(self.address+byte_offset, string_address, len(string_bytes))
 
-    def write_bytes(self, byte_list):
+    def write_string(self, string, byte_offset=0, encoding='ascii'):
+        self.write_bytestring(bytearray(string, encoding), byte_offset)
+
+    def write_bytes(self, byte_list, byte_offset=0):
         self.check_address()
         
         if not getattr(byte_list, '__iter__', None):
             raise AllocationError('byte_list not iterable')
 
-        return self.write_string(''.join(map(chr, byte_list)))
-
+        return self.write_bytestring(bytearray(byte_list), byte_offset)
+    
     def __del__(self):
         self.free()

@@ -103,7 +103,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
     def bytespan(self):
         aligned = align(self.bitspan, self.alignment)
-        bytecount = aligned/8
+        bytecount = int(aligned/8)
         extra = int(aligned % 8 != 0)
         
         return bytecount + extra
@@ -113,12 +113,12 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
     def shifted_bytespan(self):
         aligned = align(self.shifted_bitspan(), self.alignment)
-        bytecount = aligned/8
+        bytecount = int(aligned/8) # python3 turns this into a float
         extra = int(aligned % 8 != 0)
         
         return bytecount + extra
 
-    def read_string(self, byte_length, byte_offset=0):
+    def read_bytestring(self, byte_length, byte_offset=0):
         if self.invalidated:
             raise MemoryRegionError('memory region has been invalidated')
         
@@ -126,12 +126,20 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
 
         if self.allocation:
-            return self.allocation.read_string(byte_length, byte_offset)
+            return self.allocation.read_bytestring(byte_length, byte_offset)
         else:
-            return ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
+            string_at = ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
+
+            if isinstance(string_at, str): # python 2
+                string_at = bytearray(string_at)
+
+            return string_at
+
+    def read_string(self, byte_length, byte_offset=0, encoding='ascii'):
+        self.read_bytestring(byte_length, byte_offset).decode(encoding)
     
     def read_bytes(self, byte_length, byte_offset=0):
-        return list(map(ord, self.read_string(byte_length, byte_offset)))
+        return list(self.read_bytestring(byte_length, byte_offset))
 
     def read_bytelist_for_bits(self, bit_length, bit_offset=0, hinting=True):
         if bit_length + bit_offset > self.bitspan:
@@ -144,10 +152,10 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             true_offset = bit_offset
 
         # get the number of bytes necessary to grab our contextual bits
-        byte_length = align(bit_length+(true_offset % 8), 8)/8
+        byte_length = int(align(bit_length+(true_offset % 8), 8)/8)
 
         # convert the bytes into a string of bits
-        return self.read_bytes(byte_length, true_offset/8)
+        return self.read_bytes(byte_length, int(true_offset/8))
 
     def read_bitlist_from_bytes(self, bit_length, bit_offset=0, hinting=True):
         if bit_length + bit_offset > self.bitspan:
@@ -172,7 +180,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         converted_bytes = self.read_bitlist_from_bytes(bit_length, bit_offset)
 
-        return map(int, converted_bytes)[true_offset:bit_length+true_offset]
+        return list(map(int, converted_bytes))[true_offset:bit_length+true_offset]
 
     def read_bits(self, bit_length=None, bit_offset=0, hinting=True):
         if not bit_length:
@@ -183,7 +191,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def read_bytes_from_bits(self, bit_length, bit_offset=0, hinting=True):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
 
-    def write_string(self, string_val, byte_offset=0):
+    def write_bytestring(self, string_val, byte_offset=0):
         if self.invalidated:
             raise MemoryRegionError('memory region has been invalidated')
         
@@ -191,12 +199,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
 
         if self.allocation:
-            self.allocation.write_string(string_val, byte_offset)
+            self.allocation.write_bytestring(string_val, byte_offset)
         else:
-            ctypes.memmove(int(self.memory_base)+byte_offset, string_address(string_val), len(string_val))
+            string_buffer = ctypes.create_string_buffer(bytes(string_val))
+            string_address = ctypes.addressof(string_buffer)
+            ctypes.memmove(int(self.memory_base)+byte_offset, string_address, len(string_val))
 
     def write_bytes(self, byte_list, byte_offset=0):
-        return self.write_string(''.join(map(chr, byte_list)), byte_offset)
+        return self.write_bytestring(bytearray(byte_list), byte_offset)
 
     def write_bits(self, bit_list, bit_offset=0, hinting=True):
         if len(bit_list) + bit_offset > self.bitspan:
@@ -208,8 +218,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             true_offset = bit_offset
             
         true_terminus = true_offset + len(bit_list)
-        byte_start = true_offset/8
-        byte_end = true_terminus/8
+        byte_start = int(true_offset/8)
+        byte_end = int(true_terminus/8)
 
         # value represents the number of bits which overwrite the underlying byte
         if byte_start == byte_end:
@@ -317,7 +327,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def static_bytespan(cls, **kwargs):
         bitspan = cls.static_bitspan(**kwargs)
         alignment = cls.static_alignment()
-        return align(bitspan, alignment) / 8
+        return int(align(bitspan, alignment) / 8)
 
     @classmethod
     def static_declaration(cls, **kwargs):

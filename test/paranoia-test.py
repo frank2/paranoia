@@ -14,11 +14,11 @@ ALLOCATOR = Allocator()
 
 def test_Allocator():
     byte_buffer = ALLOCATOR.allocate(20)
-    assert ALLOCATOR.address_map.has_key(byte_buffer.address)
+    assert byte_buffer.address in ALLOCATOR.address_map
     assert len(byte_buffer.read_string()) == 20
 
     string_buffer = ALLOCATOR.allocate_string('string')
-    assert ALLOCATOR.address_map.has_key(string_buffer.address)
+    assert string_buffer.address in ALLOCATOR.address_map
     assert len(string_buffer.read_string()) == len('string\x00')
 
     string_address = string_buffer.address
@@ -27,29 +27,29 @@ def test_Allocator():
     string_buffer.free()
     byte_buffer.free()
     
-    assert not ALLOCATOR.address_map.has_key(string_address)
-    assert not ALLOCATOR.address_map.has_key(byte_address)
+    assert string_address not in ALLOCATOR.address_map
+    assert byte_address not in ALLOCATOR.address_map
 
 def test_MemoryRegion():
-    print '[test_MemoryRegion]'
+    print('[test_MemoryRegion]')
 
     init_string = 'MemoryRegion test'
     region = MemoryRegion(string_data=init_string)
 
     # run basic assertions
     assert region.bitspan == len(init_string)*8
-    assert region.read_bytes(len(init_string)) == map(ord, init_string)
-    assert region.read_bytes(len(init_string)-1, 1) == map(ord, init_string[1:])
-    print '[MemoryRegion.read_bytes: PASS]'
+    assert region.read_bytes(len(init_string)) == list(map(ord, init_string))
+    assert region.read_bytes(len(init_string)-1, 1) == list(map(ord, init_string[1:]))
+    print('[MemoryRegion.read_bytes: PASS]')
 
     assert region.read_bits_from_bytes(4) == [0, 1, 0, 0]
     assert region.read_bits_from_bytes(4, 4) == [1, 1, 0, 1]
     assert region.read_bits_from_bytes(4, 6) == [0, 1, 0, 1]
-    print '[MemoryRegion.read_bits_from_bytes: PASS]'
+    print('[MemoryRegion.read_bits_from_bytes: PASS]')
 
     assert region.read_bytes_from_bits(8, 4) == [int('11010110', 2)]
     assert region.read_bytes_from_bits(6, 4) == [int('110101', 2)]
-    print '[MemoryRegion.read_bytes_from_bits: PASS]'
+    print('[MemoryRegion.read_bytes_from_bits: PASS]')
 
     region.write_bytes([69, 72, 45, 54], 0)
     assert region.read_bytes(4) == [69, 72, 45, 54]
@@ -57,13 +57,13 @@ def test_MemoryRegion():
     assert region.read_bytes(4, 4) == [69, 72, 45, 54]
     region.write_bytes([77], 4)
     assert region.read_bytes(4, 4) == [77, 72, 45, 54]
-    print '[MemoryRegion.write_bytes: PASS]'
+    print('[MemoryRegion.write_bytes: PASS]')
 
     region.write_bits([1] * 4)
     assert region.read_bits_from_bytes(4) == [1] * 4
     region.write_bits([1] * 12, 6)
     assert region.read_bits_from_bytes(12, 6) == [1] * 12
-    print '[MemoryRegion.write_bits: PASS]'
+    print('[MemoryRegion.write_bits: PASS]')
 
     misaligned = MemoryRegion(memory_base=region.memory_base, bitspan=12)
     assert misaligned.bitspan == 12
@@ -72,10 +72,10 @@ def test_MemoryRegion():
     assert misaligned.bitspan == 12
     assert misaligned.shifted_bitspan() == 17
     assert misaligned.shifted_bytespan() == 3
-    print '[MemoryRegion.alignment: PASS]'
+    print('[MemoryRegion.alignment: PASS]')
 
 def test_NumericRegion():
-    print '[test_NumericRegion]'
+    print('[test_NumericRegion]')
 
     region = NumericRegion(bitspan=4*8)
     region.set_value(0x80)
@@ -87,7 +87,7 @@ def test_NumericRegion():
     assert region.get_value() == 0x40
     region.endianness = NumericRegion.BIG_ENDIAN
     assert region.get_value() == 0x40000000
-    print '[NumericRegion.get_value: PASS]'
+    print('[NumericRegion.get_value: PASS]')
 
     region.bitspan = 32
     region.endianness = NumericRegion.LITTLE_ENDIAN
@@ -104,7 +104,7 @@ def test_NumericRegion():
     region.bitspan = 16
     region.set_value(0x5566)
     assert region.get_value() == 0x5566
-    print '[NumericRegion.set_value: PASS]'
+    print('[NumericRegion.set_value: PASS]')
 
     region.signage = NumericRegion.SIGNED
     region.bitspan = 32
@@ -112,41 +112,41 @@ def test_NumericRegion():
     assert region.get_value() == -1
     region.set_value(-2)
     assert region.get_value() == -2
-    print '[NumericRegion.SIGNED: PASS]'
+    print('[NumericRegion.SIGNED: PASS]')
 
 def test_NumericTypes():
-    print '[test_Bitfield]'
+    print('[test_Bitfield]')
     bitfield_object = Bitfield(bitspan=4)
     bitfield_object.set_value(0x22) # test bit-level truncation
     assert bitfield_object.get_value() == 0x2
-    print '[Bitfield: PASS]'
+    print('[Bitfield: PASS]')
 
-    print '[test_Byte]'
+    print('[test_Byte]')
     byte_object = Byte()
     byte_object.set_value(0x66)
     assert byte_object.get_value() == 0x66
-    print '[Byte: PASS]'
+    print('[Byte: PASS]')
 
-    print '[test_Word]'
+    print('[test_Word]')
     word_object = Word()
     word_object.set_value(0x7777)
     assert word_object.get_value() == 0x7777
-    print '[Word: PASS]'
+    print('[Word: PASS]')
 
-    print '[test_Dword]'
+    print('[test_Dword]')
     dword_object = Dword()
     dword_object.set_value(0x88888888)
     assert dword_object.get_value() == 0x88888888
-    print '[Dword: PASS]'
+    print('[Dword: PASS]')
 
-    print '[test_Qword]'
+    print('[test_Qword]')
     qword_object = Qword()
     qword_object.set_value(0x2222222222222222)
     assert qword_object.get_value() == 0x2222222222222222
-    print '[Qword: PASS]'
+    print('[Qword: PASS]')
 
 def test_Float():
-    print '[test_Float]'
+    print('[test_Float]')
 
     floats = [2.625, -4.75, 0.40625, -12.0, 1.7, -1313.3125, 0.1015625, 39887.5625, 728.25]
 
@@ -154,29 +154,29 @@ def test_Float():
         double_obj = Double(value=f)
         assert float(double_obj) == f
 
-    print '[Float: PASS]'
+    print('[Float: PASS]')
         
 def test_CharTypes():
     # allocate a string
     c_buffer = ALLOCATOR.allocate_string('Character Buffer')
     c_address = c_buffer.address_object()
 
-    print '[test_Char]'
+    print('[test_Char]')
     char_object = Char(memory_base=c_address)
     assert char_object.get_char_value() == 'C'
-    print '[Char.get_char_value: PASS]'
+    print('[Char.get_char_value: PASS]')
 
     char_object.set_char_value('D')
     assert char_object.get_char_value() == 'D'
-    print '[Char.set_char_value: PASS]'
+    print('[Char.set_char_value: PASS]')
 
-    print '[test_Wchar]'
+    print('[test_Wchar]')
 
     wchar_object = Wchar(memory_base=c_address)
     wchar_object.set_wchar_value(u'한')
     assert wchar_object.get_wchar_value() == u'한'
 
-    print '[Wchar: PASS]'
+    print('[Wchar: PASS]')
 
     c_buffer.free()
 
@@ -185,7 +185,7 @@ def test_Declaration():
     c_buffer = ALLOCATOR.allocate_string('Character Buffer')
     c_address = c_buffer.address_object()
 
-    print '[test_Declaration]'
+    print('[test_Declaration]')
     declaration = Declaration(base_class=Byte)
     instantiated = declaration.instantiate(memory_base=c_address)
     assert isinstance(instantiated, Byte)
@@ -196,13 +196,13 @@ def test_Declaration():
                                            ,bitshift=4)
     assert int(instantiated.memory_base) == int(c_address)
     assert instantiated.bitshift == 4
-    print '[Declaration.instantiate: PASS]'
+    print('[Declaration.instantiate: PASS]')
 
     assert declaration.bitspan() == 8
 
     declaration = Declaration(base_class=Bitfield, args={'bitspan': 4})
     assert declaration.bitspan() == 4
-    print '[Declaration.bitspan: PASS]'
+    print('[Declaration.bitspan: PASS]')
 
     c_buffer.free()
 
@@ -211,7 +211,7 @@ def test_List():
     c_buffer = ALLOCATOR.allocate_string("\x00\x01\x01\x02\x02\x02\x02\x03\x03\x03\x03\x03\x03\x03\x03")
     c_address = c_buffer.address_object()
 
-    print '[test_List]'
+    print('[test_List]')
     data_list = List(declarations=[Declaration(base_class=Byte)
                                    ,Declaration(base_class=Word)
                                    ,Declaration(base_class=Dword)]
@@ -230,7 +230,6 @@ def test_List():
 
     word_item = data_list.instantiate(1)
     assert isinstance(word_item, Word)
-    print map(hex, map(ord, ctypes.string_at(int(word_item.memory_base), 32)))
     assert word_item.get_value() == 0x101
     assert int(word_item.memory_base) == int(c_address)+1
 
@@ -238,37 +237,38 @@ def test_List():
     assert isinstance(dword_item, Dword)
     assert dword_item.get_value() == 0x2020202
     assert int(dword_item.memory_base) == int(c_address)+3
-    print '[List.instantiate: PASS]'
+    print('[List.instantiate: PASS]')
 
     data_list.append_declaration(Declaration(base_class=Qword))
     assert data_list.declaration_offsets[hash(data_list.declarations[3])]['memory_offset'] == 7
     qword_item = data_list.instantiate(3)
     assert isinstance(qword_item, Qword)
-    assert qword_item.get_value() == 0x303030303030303
+    # this should not evaluate because the buffer should have been resized and
+    # reallocated, thus truncating the binary value
+    assert not qword_item.get_value() == 0x303030303030303
     assert int(qword_item.memory_base) == int(c_address)+7
-    print '[List.append_declaration: PASS]'
+    print('[List.append_declaration: PASS]')
 
+    qword_item.set_value(0x303030303030303)
     data_list.remove_declaration(2)
     qword_item = data_list.instantiate(2)
     assert isinstance(qword_item, Qword)
     assert int(qword_item.memory_base) == int(c_address)+3
-    print '[List.remove_declaration: PASS]'
+    print('[List.remove_declaration: PASS]')
 
     data_list.insert_declaration(1, Declaration(base_class=Dword))
     dword_item = data_list.instantiate(1)
     assert isinstance(dword_item, Dword)
     assert int(dword_item.memory_base) == int(c_address)+1
     assert data_list.declaration_offsets[hash(data_list.declarations[2])]['memory_offset'] == 5
-    print '[List.insert_declaration: PASS]'
+    print('[List.insert_declaration: PASS]')
 
-    print '[test_List] pre append_declarations = %d' % data_list.bitspan
     data_list.append_declarations([Declaration(base_class=SizeHint
                                                ,args={'target_declaration': 5
                                                       ,'argument': 'elements'
                                                       ,'bitspan': 8})
                                   ,Declaration(base_class=Array
                                                ,args={'base_class': Dword})])
-    print '[test_List] post append_declarations = %d' % data_list.bitspan
 
     hint_object = data_list.instantiate(4)
     hint_object.set_value(2)
@@ -285,7 +285,7 @@ def test_Array():
     c_address = c_buffer.address_object()
 
     # TODO what's the test-case for an array of bitfields?
-    print '[test_Array]'
+    print('[test_Array]')
     byte_array = Array(base_class=Byte
                        ,elements=20
                        ,memory_base=c_address
@@ -302,7 +302,7 @@ def test_Array():
 
     byte_array.elements = 15
     assert len(byte_array.declarations) == 15
-    print '[Array.parse_elements: PASS]'
+    print('[Array.parse_elements: PASS]')
 
     class SizeTestClass(Array):
         BASE_CLASS = Byte
@@ -311,12 +311,12 @@ def test_Array():
     byte_array = StaticSizeClass(memory_base=c_address)
     assert len(byte_array.declarations) == 20
     assert byte_array.instantiate(5).get_value() == 0x50
-    print '[Array.static_size: PASS]'
+    print('[Array.static_size: PASS]')
 
     c_buffer.free()
 
 def test_String():
-    print '[test_String]'
+    print('[test_String]')
     
     test_string = 'string\x00data\x00here\x00'
     char_array = CharArray(elements=len(test_string)
@@ -328,7 +328,6 @@ def test_String():
     string_obj.set_value('str data')
     assert str(string_obj) == 'str data'
 
-    print '[test_String] string_array'
     string_array = Array(base_class=String
                          ,elements=3)
 
@@ -342,10 +341,10 @@ def test_String():
     assert int(string_array[1].memory_base) == int(string_array[0].memory_base)+len('first string\x00')
     assert string_array[1].get_value() == 'second string'
 
-    print '[String: PASS]'
+    print('[String: PASS]')
 
 def test_Structure():
-    print '[test_Structure]'
+    print('[test_Structure]')
 
     array_class = Array.static_declaration(base_class=Byte, elements=21)
 
@@ -376,7 +375,7 @@ def test_Structure():
                                   ,'argument': 'elements'})
         ,('sized_array', Array, {'base_class': Word})])
 
-    struct_size = structure_class.static_bitspan() / 8
+    struct_size = int(structure_class.static_bitspan() / 8)
     c_buffer = ALLOCATOR.allocate(struct_size)
     c_address = c_buffer.address_object()
     structure_instance = structure_class(memory_base=c_address)
@@ -433,10 +432,10 @@ def test_Structure():
     structure_instance.size_hint.set_value(4)
     assert structure_instance.sized_array.elements == 4
 
-    print '[Structure: PASS]'
+    print('[Structure: PASS]')
 
 def test_Union():
-    print '[test_Union]'
+    print('[test_Union]')
 
     array_class = Array.static_declaration(base_class=Byte, elements=7)
 
@@ -473,10 +472,10 @@ def test_Union():
     assert union_instance.array[6].get_value() == 0x42
     assert union_instance.bitfield.get_value() == 0x8400000084008400
 
-    print '[Union: PASS]'
+    print('[Union: PASS]')
 
 def test_Pointer():
-    print '[test_Pointer]'
+    print('[test_Pointer]')
 
     dword_obj = Dword()
     dword_obj.set_value(0x32323232)
@@ -490,7 +489,7 @@ def test_Pointer():
     dword_array[10].set_value(0x42424242)
     dword_array[0].set_value(0x21212121)
 
-    if dword_obj.memory_base < 0xFFFFFFFF:
+    if int(dword_obj.memory_base) < 0xFFFFFFFF:
         pointer_class = Pointer32
     else:
         pointer_class = Pointer64
@@ -518,7 +517,7 @@ def test_Pointer():
     assert array_pointer_front[10].get_value() == 0x42424242
     assert array_pointer_middle[-10].get_value() == 0x21212121
 
-    print '[Pointer: PASS]'
+    print('[Pointer: PASS]')
 
 def main(*args):
     test_Allocator()

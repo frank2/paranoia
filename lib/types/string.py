@@ -98,11 +98,11 @@ class String(Array):
         base_size = sizeof(base_class)
         bytespan = 0
 
-        while not ctypes.string_at(int(memory_base)+bytespan, base_size) == '\x00' * base_size:
+        while not bytearray(ctypes.string_at(int(memory_base)+bytespan, base_size)) == bytearray([0] * base_size):
             bytespan += base_size
 
-        result = (bytespan+base_size)/base_size
-        return (bytespan+base_size)/base_size
+        result = int((bytespan+base_size)/base_size)
+        return int((bytespan+base_size)/base_size)
 
     @classmethod
     def static_declaration(cls, **kwargs):

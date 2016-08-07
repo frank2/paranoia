@@ -26,7 +26,7 @@ class Array(d_list.List):
 
         if not string_data is None and len(string_data) and self.elements == 0:
             base_size = self.base_class.static_bitspan()
-            self.elements = align(len(string_data) / base_size, base_size) / base_size
+            self.elements = int(align(int(len(string_data) / base_size), base_size) / base_size)
 
         d_list.List.__init__(self, **kwargs)
 

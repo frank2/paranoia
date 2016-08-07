@@ -3,6 +3,11 @@
 from paranoia.base import declaration, memory_region, size_hint, paranoia_agent
 from paranoia.converters import *
 
+try:
+    import __builtin__
+except ImportError: # python3
+    import builtins as __builtin__
+
 __all__ = ['is_size_hint', 'ListError', 'List']
 
 def is_size_hint(decl):
@@ -99,9 +104,14 @@ class List(memory_region.MemoryRegion):
         self.hint_map[resolved_decl] = declaration_hash
 
     def calculate_offsets(self, start_from=0):
+        long = getattr(__builtin__, 'long', None)
+
+        if long is None: # python 3
+            long = int
+            
         if isinstance(start_from, declaration.Declaration):
             start_from = self.declarations.index(start_from)
-        elif not isinstance(start_from, int):
+        elif not isinstance(start_from, (int, long)):
             raise ListError('start_from must be an int, long or Declaration')
             
         declarative_length = len(self.declarations)
@@ -137,7 +147,7 @@ class List(memory_region.MemoryRegion):
 
                 shift_and_span = align(previous_shift + previous_span, alignment)
 
-                new_memory_offset = previous_memory_offset + (shift_and_span / 8)
+                new_memory_offset = previous_memory_offset + int(shift_and_span / 8)
                 new_shift = shift_and_span % 8
                 
                 offset_dict['bitshift'] = new_shift
