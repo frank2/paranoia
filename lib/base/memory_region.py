@@ -192,7 +192,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
 
     def read_memory(self):
-        return self.read_bytestring(0, self.shifted_bytespan())
+        return self.read_bytestring(self.shifted_bytespan())
     
     def write_bytestring(self, string_val, byte_offset=0):
         if self.invalidated:
