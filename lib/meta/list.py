@@ -423,21 +423,6 @@ class List(memory_region.MemoryRegion):
 
         return instance
 
-    def read_memory(self):
-        bitlist = list()
-
-        for i in range(len(self.declarations)):
-            decl_hash = hash(self.declarations[i])
-
-            if decl_hash in self.instance_map:
-                instance = self.instance_map[decl_hash]
-            else:
-                instance = self.instantiate(decl_hash)
-                
-            bitlist += instance.read_bits(instance.bitspan)
-
-        return ''.join(map(chr, bitlist_to_bytelist(bitlist)))
-
     def __getitem__(self, index):
         return self.instantiate(index)
     

@@ -191,6 +191,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def read_bytes_from_bits(self, bit_length, bit_offset=0, hinting=True):
         return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
 
+    def read_memory(self):
+        return self.read_bytestring(0, self.shifted_bytespan())
+    
     def write_bytestring(self, string_val, byte_offset=0):
         if self.invalidated:
             raise MemoryRegionError('memory region has been invalidated')
