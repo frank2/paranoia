@@ -423,6 +423,14 @@ class List(memory_region.MemoryRegion):
 
         return instance
 
+    def read_memory(self):
+        # initialize all the arguments to get the most accurate read-out of
+        # what should be in the object
+        for i in range(len(self.declarations)):
+            self.instantiate(i)
+
+        return super(List, self).read_memory()
+
     def __getitem__(self, index):
         return self.instantiate(index)
     
