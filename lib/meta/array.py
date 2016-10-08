@@ -19,9 +19,6 @@ class Array(d_list.List):
 
         string_data = kwargs.setdefault('string_data', self.STRING_DATA)
 
-        if self.elements == 0:
-            raise ArrayError('elements cannot be 0')
-
         kwargs['declarations'] = [declaration.Declaration(base_class=self.base_class) for i in range(self.elements)]
 
         if not string_data is None and len(string_data) and self.elements == 0:

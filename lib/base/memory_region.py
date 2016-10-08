@@ -73,8 +73,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if self.alignment is None or self.alignment < 0:
             raise MemoryRegionError('alignment cannot be None or less than 0')
 
-        if self.bitspan is None or self.bitspan == 0:
-            raise MemoryRegionError('bitspan cannot be None or 0')
+        if self.bitspan is None:
+            raise MemoryRegionError('bitspan cannot be None')
 
         if self.bitshift > 8 or self.bitshift < 0:
             raise MemoryRegionError('bitshift must be within the range of 0-8 noninclusive')
