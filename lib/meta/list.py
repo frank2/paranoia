@@ -16,6 +16,12 @@ def is_size_hint(decl):
 class ListError(paranoia_agent.ParanoiaError):
     pass
 
+class NewList(memory_region.MemoryRegion):
+    DECLARATIONS = None
+
+    def __init__(self, **kwargs):
+        self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
+
 class List(memory_region.MemoryRegion):
     DECLARATIONS = None
     BIND = True

@@ -151,7 +151,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             return 0
 
         start, end = offsets[-1]
-        return align(end, self.alignment)
+        return end
 
     def has_subregion(self, decl):
         if not isinstance(decl, declaration.Declaration):
@@ -167,19 +167,19 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('decl base_class must implement MemoryRegion')
         
         if bit_offset is None:
-            bit_offset = self.next_subregion_offset()
+            bit_offset = align(self.next_subregion_offset(), decl.alignment())
         else:
-            bit_offset = align(bit_offset, self.alignment)
+            bit_offset = align(bit_offset, decl.alignment())
             
-        aligned_bitspan = align(bit_offset+decl.bitspan(), self.alignment)
+        aligned_bitspan = align(bit_offset+decl.bitspan(), decl.alignment())
         
         if self.in_subregion(bit_offset, aligned_bitspan):
             raise MemoryRegionError('subregion declaration overwrites another subregion')
         else if aligned_bitspan > self.shifted_bitspan():
             raise MemoryRegionError('subregion exceeds size of parent region')
 
-        declaration.args['memory_base'] = self.bit_offset_to_base(bit_offset)
-        declaration.args['bitshift'] = self.bit_offset_to_shift(bit_offset)
+        decl.args['memory_base'] = self.bit_offset_to_base(bit_offset, decl.alignment())
+        decl.args['bitshift'] = self.bit_offset_to_shift(bit_offset, decl.alignment())
 
         self.subregions[bit_offset] = decl
         self.subregion_ids[id(decl)] = bit_offset
@@ -216,8 +216,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.declare_subregion(decl, new_offset)
 
         if data:
-            decl.instance.memory_base = self.bit_offset_to_base(new_offset)
-            decl.instance.bitshift = self.bit_offset_to_shift(new_offset)
+            decl.instance.memory_base = self.bit_offset_to_base(new_offset, decl.alignment())
+            decl.instance.bitshift = self.bit_offset_to_shift(new_offset, decl.alignment())
             decl.instance.write_bits(data)
 
     def resize_subregion(self, decl, new_size):
@@ -259,18 +259,19 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         return None
 
-    def bit_offset_to_base(self, bit_offset):
-        aligned = align(bit_offset, self.alignment)
+    def bit_offset_to_base(self, bit_offset, alignment):
+        aligned = align(bit_offset, alignment)
         bytecount = int(aligned/8) # python3 makes a float
-        extra = int(not aligned % 8 == 0)
 
-        return self.memory_base + bytecount + extra
+        return self.memory_base.fork(bytecount)
 
-    def bit_offset_to_shift(self, bit_offset):
-        if self.alignment == MemoryRegion.ALIGN_BIT:
+    def bit_offset_to_shift(self, bit_offset, alignment):
+        if alignment == MemoryRegion.ALIGN_BIT:
             return bit_offset % 8
-        else:
+        elif alignment == MemoryRegion.ALIGN_BYTE:
             return 0
+        else:
+            return align(bit_offset, alignment) % 8
 
     def bytespan(self):
         aligned = align(self.bitspan, self.alignment)
