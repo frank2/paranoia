@@ -26,11 +26,14 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         if not isinstance(self.args, dict):
             raise DeclarationError('args must be a dictionary object')
 
+        self.instance = None
+
     def instantiate(self, **kwargs):
         dict_merge(kwargs, self.args)
         kwargs['declaration'] = self
 
-        return self.base_class(**kwargs)
+        self.instance = self.base_class(**kwargs)
+        return self.instance
 
     def bitspan(self, **kwargs):
         if 'bitspan' not in self.args:
