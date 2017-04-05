@@ -1,12 +1,61 @@
 #!/usr/bin/env python
 
+import inspect
+
 from paranoia.meta import list as d_list
+from paranoia.meta.list import NewList
 from paranoia.base import declaration, memory_region
 
 __all__ = ['MappingError', 'Mapping']
 
 class MappingError(d_list.ListError):
     pass
+
+class NewMapping(NewList):
+    FIELDS = None
+
+    def __init__(self, **kwargs):
+        fields = kwargs.setdefault('fields', self.FIELDS)
+
+        if fields is None or not getattr(fields, '__iter__', None):
+            raise MappingError('fields must be pairs of names and Declaration or MemoryRegion types')
+
+        self.parse_fields(fields)
+        kwargs['declarations'] = self.declarations
+
+        NewList.__init__(self, **kwargs)
+
+    def parse_fields(self, fields):
+        field_map = dict()
+        anon_map = dict()
+        declarations = list()
+        
+        anonymous_fields = 0
+
+        for field_pair in fields:
+            if not len(field_pair) == 2:
+                raise MappingError('field_pair must be a tuple of name and Declaration or MemoryRegion')
+
+            fieldname, decl = field_pair
+
+            if inspect.isclass(decl) and issubclass(decl, memory_region.MemoryRegion):
+                decl = decl.declare()
+            elif not isinstance(decl, declaration.Declaration):
+                raise MappingError('decl must be either a Declaration or a MemoryRegion')
+
+            if fieldname is None:
+                if not issubclass(decl.base_class, Mapping):
+                    raise MappingError('only mapping objects can have anonymous fields')
+
+                field_name = '__anon_field%04X' % anonymous_fields
+                anonymous_fields += 1
+                anon_fields = decl.args.get('fields', None) or decl.base_class.FIELDS
+
+                if not anon_fields:
+                    raise MappingError('no fields in mapping object')
+                
+            self.field_map[fieldname] = id(decl)
+            self.declarations.append(decl)
 
 class Mapping(d_list.List):
     FIELDS = None
@@ -15,7 +64,7 @@ class Mapping(d_list.List):
         fields = kwargs.setdefault('fields', self.FIELDS)
 
         if fields is None or not getattr(fields, '__iter__', None):
-            raise StructureError('fields must be a sequence of names and DataDeclarations')
+            raise StructureError('fields must be pairs of names and Declaration types')
 
         copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
 

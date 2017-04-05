@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import ctypes
+import inspect
+import sys
 
 from paranoia.base import allocator
 from paranoia.base import address
@@ -37,6 +39,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     ALLOCATOR = None
     STRING_DATA = None
     INVALIDATED = False
+    ZERO_MEMORY = True
+    MAXIMUM_SIZE = 0
     BITSHIFT = 0
     ALIGNMENT = 8
     ALIGN_BIT = 1
@@ -51,11 +55,11 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not self.declaration is None and not isinstance(self.declaration, declaration.Declaration):
             raise MemoryRegionError('declaration must implement Declaration')
 
-        if not self.declaration is None and not isinstance(self.declaration.base_class, self):
+        if not self.declaration is None and not issubclass(self.declaration.base_class, self.__class__):
             raise MemoryRegionError('declaration base_class mismatch')
 
         if self.declaration is None:
-            self.declaration = Declaration(base_class=self.__class__, args=kwargs)
+            self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
             self.declaration.instance = self
 
         self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
@@ -65,9 +69,11 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
         self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
+        self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
         self.invalidated = kwargs.setdefault('invalidated', self.INVALIDATED)
-        self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
+        self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
+        self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
         self.subregions = dict()
         self.subregion_ids = dict()
         
@@ -112,6 +118,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not self.memory_base is None and not isinstance(self.memory_base, address.Address):
             raise MemoryRegionError('memory_base must be an Address object')
 
+        if self.zero_memory and self.is_allocated() and not self.bitspan == 0:
+            self.write_bits([0] * self.bitspan)
+
         if not string_data is None:
             self.parse_string_data(string_data)
 
@@ -139,7 +148,28 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
             end_region = bit_offset + bitspan
 
-            if end_region >= start and end_region < end:
+            if end_region > start and end_region < end:
+                return True
+
+        return False
+
+    def overwrites_subregion(self, bit_offset, bitspan):
+        offsets = self.subregion_offsets()
+
+        for pairing in offsets:
+            start, end = pairing
+            end_region = bit_offset + bitspan
+
+            # overwrites entire subregion
+            if bit_offset < start and end_region >= end:
+                return True
+
+            # offset starts in middle of subregion
+            if start < bit_offset <= end:
+                return True
+
+            # offset ends in middle of subregion
+            if start <= end_region <= end:
                 return True
 
         return False
@@ -160,79 +190,136 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return id(decl) in self.subregion_ids
 
     def declare_subregion(self, decl, bit_offset=None):
-        if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+        if inspect.isclass(decl) and issubclass(decl, MemoryRegion):
+            decl = decl.declare()
+        elif not isinstance(decl, declaration.Declaration):
+            raise MemoryRegionError('decl must be a Declaration object or MemoryRegion class')
 
-        if not issubclass(decl.base_class, MemoryRegion):
-            raise MemoryRegionError('decl base_class must implement MemoryRegion')
+        if self.has_subregion(decl):
+            raise MemoryRegionError('region already has subregion declaration')
         
         if bit_offset is None:
             bit_offset = align(self.next_subregion_offset(), decl.alignment())
         else:
             bit_offset = align(bit_offset, decl.alignment())
-            
-        aligned_bitspan = align(bit_offset+decl.bitspan(), decl.alignment())
         
-        if self.in_subregion(bit_offset, aligned_bitspan):
+        if self.in_subregion(bit_offset, decl.bitspan()):
             raise MemoryRegionError('subregion declaration overwrites another subregion')
-        else if aligned_bitspan > self.shifted_bitspan():
-            raise MemoryRegionError('subregion exceeds size of parent region')
-
-        decl.args['memory_base'] = self.bit_offset_to_base(bit_offset, decl.alignment())
-        decl.args['bitshift'] = self.bit_offset_to_shift(bit_offset, decl.alignment())
 
         self.subregions[bit_offset] = decl
         self.subregion_ids[id(decl)] = bit_offset
 
-        return bit_offset
+        if decl.bitspan() > self.shifted_bitspan():
+            try:
+                self.accomodate_subregion(decl, decl.bitspan())
+            except Exception,e:
+                del self.subregions[bit_offset]
+                del self.subregion_ids[id(decl)]
+                raise e
+
+        new_base = self.bit_offset_to_base(bit_offset, decl.alignment())
+        new_shift = self.bit_offset_to_shift(bit_offset, decl.alignment())
+
+        if not decl.instance is None:
+            decl.instance.memory_base = new_base
+            decl.instance.bitshift = new_shift
+        else:
+            decl.args['memory_base'] = new_base
+            decl.args['bitshift'] = new_shift
+
+        return decl
 
     def remove_subregion(self, decl):
         if not isinstance(decl, declaration.Declaration):
             raise MemoryRegionError('decl must be a Declaration object')
 
-        if id(decl) in self.subregion_ids:
-            offset = self.subregion_ids[id(decl)]
-            del self.subregion_ids[id(decl)]
-            del self.subregions[offset]
-            return
+        if not self.has_subregion(decl):
+            raise MemoryRegionError('no subregion found')
+        
+        if not decl.instance is None and decl.instance.zero_memory:
+            decl.instance.write_bits([0] * decl.bitspan())
 
-        raise MemoryRegionError("couldn't find region")
+        offset = self.subregion_ids[id(decl)]
+        del self.subregion_ids[id(decl)]
+        del self.subregions[offset]
+
+        if not decl.instance is None:
+            decl.instance.invalidated = True
 
     def move_subregion(self, decl, new_offset):
         if not isinstance(decl, declaration.Declaration):
             raise MemoryRegionError('decl must be a Declaration object')
 
-        if not id(decl) in self.subregion_ids:
+        if not self.has_subregion(decl):
             raise MemoryRegionError('subregion not found')
 
         current_offset = self.subregion_ids[id(decl)]
+
+        if new_offset == current_offset:
+            return
 
         if not decl.instance is None:
             data = decl.instance.read_bits()
         else:
             data = None
-
+        
         self.remove_subregion(decl)
         self.declare_subregion(decl, new_offset)
 
+        new_base = self.bit_offset_to_base(new_offset, decl.alignment())
+        new_shift = self.bit_offset_to_shift(new_offset, decl.alignment())
+
         if data:
-            decl.instance.memory_base = self.bit_offset_to_base(new_offset, decl.alignment())
-            decl.instance.bitshift = self.bit_offset_to_shift(new_offset, decl.alignment())
+            # region should not be invalidated
+            decl.instance.invalidated = False
+
+            if decl.instance.zero_memory:
+                decl.instance.write_bits([0] * decl.bitspan())
+
+            decl.instance.memory_base = new_base
+            decl.instance.bitshift = new_shift
             decl.instance.write_bits(data)
+        else:
+            decl.args['memory_base'] = new_base
+            decl.args['bitshift'] = new_shift
+
+    def accomodate_subregion(self, decl, new_size):
+        # called when a subregion wants to resize. this handles e.g. reallocating the memory region
+        # if it has been allocated
+        if not isinstance(decl, declaration.Declaration):
+            raise MemoryRegionError('decl must be a Declaration object')
+
+        if not self.has_subregion(decl):
+            raise MemoryRegionError('subregion not found')
+
+        current_offset = self.subregion_ids[id(decl)]
+
+        if self.overwrites_subregion(current_offset, new_size):
+            raise MemoryRegionError('accomodation overwrites another region')
+
+        aligned_size = align(current_offset + new_size, decl.alignment())
+
+        if aligned_size <= self.bitspan:
+            return
+
+        self.resize(aligned_size)
 
     def resize_subregion(self, decl, new_size):
         if not isinstance(decl, declaration.Declaration):
             raise MemoryRegionError('decl must be a Declaration object')
 
-        if not id(decl) in self.subregion_ids:
+        if not self.has_subregion(decl):
             raise MemoryRegionError('subregion not found')
+        
+        self.accomodate_subregion(decl, new_size)
 
         current_offset = self.subregion_ids[id(decl)]
-        
+
         self.remove_subregion(decl)
         
+        aligned_size = align(current_offset + new_size, decl.alignment())
         old_size = decl.args['bitspan']
-        decl.args['bitspan'] = new_size
+        decl.args['bitspan'] = aligned_size
 
         try:
             self.declare_subregion(decl, current_offset)
@@ -241,7 +328,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise e
 
         if not decl.instance is None:
-            decl.instance.bitspan = new_size
+            decl.instance.bitspan = aligned_size
         
     def bit_offset_subregion(self, bit_offset):
         if bit_offset in self.subregions:
@@ -467,19 +554,89 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.allocation = self.allocator.allocate(self.shifted_bytespan())
         self.memory_base = self.allocation.address_object()
 
-    def reallocate(self):
+    def reallocate(self, new_allocation=None):
         if not self.parent_region is None:
             return self.parent_region.reallocate(new_bitspan)
         
         if not self.is_allocated():
-            return
+            raise MemoryRegionError('region was not allocated')
 
-        shifted_bytespan = self.shifted_bytespan()
+        if new_allocation is None:
+            shifted_bytespan = self.shifted_bytespan()
+        else:
+            shifted_bytespan = int(new_allocation / 8)
+            shifted_bytespan += int(not new_allocation % 8 == 0)
         
         if self.allocation.size == shifted_bytespan:
             return
         
-        self.allocation.reallocate(self.shifted_bytespan())
+        self.allocation.reallocate(shifted_bytespan)
+
+    def resize(self, new_bitspan):
+        if not self.maximum_size == 0 and new_bitspan > self.maximum_size:
+            raise MemoryRegionError('new size exceeds maximum size')
+        
+        if not self.parent_region is None: # subregion
+            self.parent_region.resize_subregion(self.declaration, new_bitspan)
+            return
+
+        # region is a parent, check if it's allocated
+        if not self.is_allocated():
+            raise MemoryRegionError('cannot reallocate a static parent region')
+
+        self.reallocate(new_bitspan)
+        self.bitspan = new_bitspan
+
+    def hexdump(self):
+        bytelist = self.read_bytes(self.shifted_bytespan())
+        bitlist = self.read_bits()
+        bit_delta = -self.bitshift
+        byte_iterator = 0
+        bit_iterator = 0
+
+        while byte_iterator < align(len(bytelist), 8):
+            if byte_iterator % 8 == 0:
+                sys.stdout.write('%08X:%04X:X ' % (int(self.memory_base)+byte_iterator, byte_iterator))
+
+            if byte_iterator < len(bytelist):
+                sys.stdout.write('%02X%6s ' % (bytelist[byte_iterator], ''))
+            else:
+                sys.stdout.write('%8s ' % '')
+
+            if byte_iterator % 8 == 7:
+                for i in xrange(8):
+                    if byte_iterator-7+i >= len(bytelist):
+                        break
+                    
+                    byte_val = bytelist[byte_iterator-7+i]
+
+                    if byte_val >= 32 and byte_val <= 127:
+                        sys.stdout.write(chr(byte_val))
+                    else:
+                        sys.stdout.write('.')
+                        
+                sys.stdout.write('\n')
+                sys.stdout.write('%08X:%04X:B ' % (int(self.memory_base)+(byte_iterator-7), byte_iterator-7))
+                
+                while bit_iterator + bit_delta < len(bitlist):
+                    bit_offset = bit_iterator + bit_delta
+                    
+                    if bit_offset < 0 or bit_offset >= self.bitspan:
+                        sys.stdout.write(' ')
+                    else:
+                        sys.stdout.write('%d' % bitlist[bit_offset])
+
+                    if bit_iterator % 8 == 7:
+                        sys.stdout.write(' ')
+
+                    bit_iterator += 1
+
+                    if bit_iterator % 64 == 0:
+                        break
+
+                sys.stdout.write('\n\n')
+                
+            byte_iterator += 1
 
     def __hash__(self):
         return hash('%X/%d/%d' % (int(self.memory_base), self.bitspan, self.bitshift))
@@ -489,6 +646,10 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             self.__dict__['declaration'].set_arg(attr, value)
 
         paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)
+
+    @classmethod
+    def declare(cls, **kwargs):
+        return declaration.Declaration(base_class=cls, args=kwargs)
 
     @classmethod
     def static_bitspan(cls, **kwargs):

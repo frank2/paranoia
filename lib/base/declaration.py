@@ -32,6 +32,9 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         dict_merge(kwargs, self.args)
         kwargs['declaration'] = self
 
+        if not self.instance is None:
+            self.instance.invalidated = True
+            
         self.instance = self.base_class(**kwargs)
         return self.instance
 
@@ -61,3 +64,7 @@ class Declaration(paranoia_agent.ParanoiaAgent):
                              ,args=dict(list(self.args.items())[:]))
 
         return copied
+
+    def __repr__(self):
+        return '<Declaration:%s>' % self.base_class.__name__
+                      
