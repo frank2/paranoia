@@ -40,6 +40,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     STRING_DATA = None
     INVALIDATED = False
     ZERO_MEMORY = True
+    BIND = False
     MAXIMUM_SIZE = 0
     BITSHIFT = 0
     ALIGNMENT = 8
@@ -73,9 +74,11 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
         self.invalidated = kwargs.setdefault('invalidated', self.INVALIDATED)
         self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
+        self.bind = kwargs.setdefault('bind', self.BIND)
         self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
         self.subregions = dict()
-        self.subregion_ids = dict()
+        self.subregion_offsets = dict()
+        self.binding_complete = False
         
         string_data = kwargs.setdefault('string_data', self.STRING_DATA)
 
@@ -124,21 +127,27 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not string_data is None:
             self.parse_string_data(string_data)
 
+        self.binding_complete = True
+
+    def is_bound(self):
+        return self.bind and self.binding_complete
+
     def parse_string_data(self, string_data):
         self.write_bytes(list(map(ord, string_data)))
 
-    def subregion_offsets(self):
-        keys = self.subregions.keys()
-        keys.sort()
+    def subregion_ranges(self):
+        regions = self.subregion_offsets.items()
+        regions.sort(lambda x,y: cmp(x[1], y[1]))
         result = list()
 
-        for key in keys:
-            result.append((key, key + self.subregions[key].bitspan()))
+        for region in regions:
+            ident, offset = region
+            result.append((offset, offset + self.subregions[ident].bitspan()))
 
         return result
 
     def in_subregion(self, bit_offset, bitspan):
-        offsets = self.subregion_offsets()
+        offsets = self.subregion_ranges()
 
         for pairing in offsets:
             start, end = pairing
@@ -154,7 +163,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return False
 
     def overwrites_subregion(self, bit_offset, bitspan):
-        offsets = self.subregion_offsets()
+        offsets = self.subregion_ranges()
 
         for pairing in offsets:
             start, end = pairing
@@ -175,7 +184,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return False
 
     def next_subregion_offset(self):
-        offsets = self.subregion_offsets()
+        offsets = self.subregion_ranges()
 
         if len(offsets) == 0:
             return 0
@@ -187,7 +196,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not isinstance(decl, declaration.Declaration):
             raise MemoryRegionError('decl must be a Declaration object')
 
-        return id(decl) in self.subregion_ids
+        return id(decl) in self.subregions
 
     def declare_subregion(self, decl, bit_offset=None):
         if inspect.isclass(decl) and issubclass(decl, MemoryRegion):
@@ -206,15 +215,15 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if self.in_subregion(bit_offset, decl.bitspan()):
             raise MemoryRegionError('subregion declaration overwrites another subregion')
 
-        self.subregions[bit_offset] = decl
-        self.subregion_ids[id(decl)] = bit_offset
+        self.subregions[id(decl)] = decl
+        self.subregion_offsets[id(decl)] = bit_offset
 
         if decl.bitspan() > self.shifted_bitspan():
             try:
                 self.accomodate_subregion(decl, decl.bitspan())
             except Exception,e:
-                del self.subregions[bit_offset]
-                del self.subregion_ids[id(decl)]
+                del self.subregions[id(decl)]
+                del self.subregion_offsets[id(decl)]
                 raise e
 
         new_base = self.bit_offset_to_base(bit_offset, decl.alignment())
@@ -239,9 +248,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not decl.instance is None and decl.instance.zero_memory:
             decl.instance.write_bits([0] * decl.bitspan())
 
-        offset = self.subregion_ids[id(decl)]
-        del self.subregion_ids[id(decl)]
-        del self.subregions[offset]
+        del self.subregion_offsets[id(decl)]
+        del self.subregions[id(decl)]
 
         if not decl.instance is None:
             decl.instance.invalidated = True
@@ -253,7 +261,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not self.has_subregion(decl):
             raise MemoryRegionError('subregion not found')
 
-        current_offset = self.subregion_ids[id(decl)]
+        current_offset = self.subregion_offsets[id(decl)]
 
         if new_offset == current_offset:
             return
@@ -292,17 +300,17 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not self.has_subregion(decl):
             raise MemoryRegionError('subregion not found')
 
-        current_offset = self.subregion_ids[id(decl)]
+        current_offset = self.subregion_offsets[id(decl)]
 
         if self.overwrites_subregion(current_offset, new_size):
             raise MemoryRegionError('accomodation overwrites another region')
 
-        aligned_size = align(current_offset + new_size, decl.alignment())
+        new_size = current_offset + new_size
 
-        if aligned_size <= self.bitspan:
+        if new_size <= self.bitspan:
             return
 
-        self.resize(aligned_size)
+        self.resize(new_size)
 
     def resize_subregion(self, decl, new_size):
         if not isinstance(decl, declaration.Declaration):
@@ -313,13 +321,13 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         
         self.accomodate_subregion(decl, new_size)
 
-        current_offset = self.subregion_ids[id(decl)]
+        current_offset = self.subregion_offsets[id(decl)]
 
         self.remove_subregion(decl)
         
-        aligned_size = align(current_offset + new_size, decl.alignment())
+        new_size = current_offset + new_size
         old_size = decl.args['bitspan']
-        decl.args['bitspan'] = aligned_size
+        decl.args['bitspan'] = new_size
 
         try:
             self.declare_subregion(decl, current_offset)
@@ -328,23 +336,26 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise e
 
         if not decl.instance is None:
-            decl.instance.bitspan = aligned_size
+            decl.instance.bitspan = new_size
         
-    def bit_offset_subregion(self, bit_offset):
-        if bit_offset in self.subregions:
-            return self.subregions[bit_offset]
+    def bit_offset_subregions(self, bit_offset):
+        current_offsets = self.subregion_offsets.items()
+        current_offsets = filter(lambda x: x == bit_offset, current_offsets)
+        
+        if len(current_offsets):
+            return map(lambda x: self.subregions[x], current_offsets)
 
-        keys = self.subregions.keys()
-        keys.sort()
+        results = list()
+        
+        for ident in self.subregions:
+            subregion = self.subregions[ident]
+            ident_offset = self.subregion_offsets[ident]
 
-        for key in keys:
-            key = keys[index]
-            subregion = self.subregions[key]
+            if bit_offset >= ident_offset and bit_offset < ident_offset+subregion.bitspan():
+                results.append(ident)
 
-            if bit_offset >= key and bit_offset < key+subregion.bitspan():
-                return subregion
-
-        return None
+        if len(results):
+            return map(lambda x: self.subregions[x], results)
 
     def bit_offset_to_base(self, bit_offset, alignment):
         aligned = align(bit_offset, alignment)
@@ -555,21 +566,26 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.memory_base = self.allocation.address_object()
 
     def reallocate(self, new_allocation=None):
-        if not self.parent_region is None:
-            return self.parent_region.reallocate(new_bitspan)
-        
         if not self.is_allocated():
             raise MemoryRegionError('region was not allocated')
 
+        if self.is_bound():
+            raise MemoryRegionError('cannot reallocate a bound memory region')
+        
         if new_allocation is None:
             shifted_bytespan = self.shifted_bytespan()
         else:
             shifted_bytespan = int(new_allocation / 8)
             shifted_bytespan += int(not new_allocation % 8 == 0)
+
+        maximum_bytespan = (self.maximum_size)/8 + int(not self.maximum_size % 8 == 0)
         
+        if not self.maximum_size == 0 and shifted_bytespan > maximum_bytespan:
+            raise MemoryRegionError('new size exceeds maximum size')
+
         if self.allocation.size == shifted_bytespan:
             return
-        
+
         self.allocation.reallocate(shifted_bytespan)
 
     def resize(self, new_bitspan):
@@ -580,15 +596,11 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             self.parent_region.resize_subregion(self.declaration, new_bitspan)
             return
 
-        # region is a parent, check if it's allocated
-        if not self.is_allocated():
-            raise MemoryRegionError('cannot reallocate a static parent region')
-
         self.reallocate(new_bitspan)
         self.bitspan = new_bitspan
 
     def hexdump(self):
-        bytelist = self.read_bytes(self.shifted_bytespan())
+        bytelist = self.read_memory()
         bitlist = self.read_bits()
         bit_delta = -self.bitshift
         byte_iterator = 0

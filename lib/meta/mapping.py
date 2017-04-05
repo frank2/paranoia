@@ -3,7 +3,6 @@
 import inspect
 
 from paranoia.meta import list as d_list
-from paranoia.meta.list import NewList
 from paranoia.base import declaration, memory_region
 
 __all__ = ['MappingError', 'Mapping']
@@ -11,7 +10,7 @@ __all__ = ['MappingError', 'Mapping']
 class MappingError(d_list.ListError):
     pass
 
-class NewMapping(NewList):
+class NewMapping(d_list.List):
     FIELDS = None
 
     def __init__(self, **kwargs):

@@ -27,7 +27,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         system = platform.system()
 
         if system == 'Windows':
-            crt_module = cdll.msvcrt
+            crt_module = ctypes.cdll.msvcrt
         elif system.startswith('CYGWIN'):
             crt_module = ctypes.cdll.LoadLibrary('msvcrt.dll')
         elif system == 'Linux' or system.startswith('CYGWIN'):
