@@ -138,40 +138,40 @@ class FloatStub(object):
     def __float__(self):
         return self.get_value()    
 
-FloatStruct = Structure.simple([
-        ('sign', Bitfield, {'bitspan': 1})
-        ,('exponent', Bitfield, {'bitspan': 8})
-        ,('fraction', Bitfield, {'bitspan': 23})])
+FloatStruct = Structure.static_declaration(fields=[
+        ('sign', Bitfield.declare(bitspan=1))
+        ,('exponent', Bitfield.declare(bitspan=8))
+        ,('fraction', Bitfield.declare(bitspan=23))])
 
 class Float(FloatStruct, FloatStub):
     def __init__(self, **kwargs):
         FloatStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-DoubleStruct = Structure.simple([
-        ('sign', Bitfield, {'bitspan': 1})
-        ,('exponent', Bitfield, {'bitspan': 11})
-        ,('fraction', Bitfield, {'bitspan': 52})])
+DoubleStruct = Structure.static_declaration(fields=[
+        ('sign', Bitfield.declare(bitspan=1))
+        ,('exponent', Bitfield.declare(bitspan=11))
+        ,('fraction', Bitfield.declare(bitspan=52))])
 
 class Double(DoubleStruct, FloatStub):
     def __init__(self, **kwargs):
         DoubleStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-LongDoubleStruct = Structure.simple([
-        ('sign', Bitfield, {'bitspan': 1})
-        ,('exponent', Bitfield, {'bitspan': 15})
-        ,('fraction', Bitfield, {'bitspan': 63})])
+LongDoubleStruct = Structure.static_declaration(fields=[
+        ('sign', Bitfield.declare(bitspan=1))
+        ,('exponent', Bitfield.declare(bitspan=15))
+        ,('fraction', Bitfield.declare(bitspan=63))])
 
 class LongDouble(LongDoubleStruct, FloatStub):
     def __init__(self, **kwargs):
         LongDoubleStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-DoubleDoubleStruct = Structure.simple([
-        ('sign', Bitfield, {'bitspan': 1})
-        ,('exponent', Bitfield, {'bitspan': 15})
-        ,('fraction', Bitfield, {'bitspan': 112})])
+DoubleDoubleStruct = Structure.static_declaration(fields=[
+        ('sign', Bitfield.declare(bitspan=1))
+        ,('exponent', Bitfield.declare(bitspan=15))
+        ,('fraction', Bitfield.declare(bitspan=112))])
 
 class DoubleDouble(DoubleDoubleStruct, FloatStub):
     def __init__(self, **kwargs):

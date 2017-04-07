@@ -27,6 +27,17 @@ def sizeof(memory_region):
         return memory_region.bytespan()
     else:
         raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
+
+def is_region_class(obj):
+    return inspect.isclass(obj) and issubclass(obj, MemoryRegion)
+
+def ensure_declaration(obj):
+    if isinstance(obj, declaration.Declaration):
+        return obj
+    elif is_region_class(obj):
+        return obj.declare()
+    else:
+        raise MemoryRegionError('declaration must be either a Declaration object or a MemoryRegion class')
     
 class MemoryRegion(paranoia_agent.ParanoiaAgent):
     DECLARATION = None
@@ -41,6 +52,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     INVALIDATED = False
     ZERO_MEMORY = True
     BIND = False
+    OVERLAPS = False
     MAXIMUM_SIZE = 0
     BITSHIFT = 0
     ALIGNMENT = 8
@@ -53,15 +65,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         # declaration must come first to properly attribute values
         self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
 
-        if not self.declaration is None and not isinstance(self.declaration, declaration.Declaration):
-            raise MemoryRegionError('declaration must implement Declaration')
-
-        if not self.declaration is None and not issubclass(self.declaration.base_class, self.__class__):
-            raise MemoryRegionError('declaration base_class mismatch')
-
-        if self.declaration is None:
+        if not self.declaration is None:
+            self.declaration = ensure_declaration(self.declaration)
+        else:
             self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
             self.declaration.instance = self
+
+        if not issubclass(self.declaration.base_class, self.__class__):
+            raise MemoryRegionError('declaration base_class mismatch')
 
         self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
@@ -75,6 +86,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.invalidated = kwargs.setdefault('invalidated', self.INVALIDATED)
         self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
         self.bind = kwargs.setdefault('bind', self.BIND)
+        self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
         self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
         self.subregions = dict()
         self.subregion_offsets = dict()
@@ -146,44 +158,32 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         return result
 
-    def in_subregion(self, bit_offset, bitspan):
+    def in_subregion(self, bit_offset, bitspan, skip_same=False):
+        if self.overlaps:
+            return False
+        
         offsets = self.subregion_ranges()
 
         for pairing in offsets:
             start, end = pairing
+
+            if skip_same and bit_offset == start:
+                continue
 
             if bit_offset >= start and bit_offset < end:
                 return True
 
             end_region = bit_offset + bitspan
 
-            if end_region > start and end_region < end:
-                return True
-
-        return False
-
-    def overwrites_subregion(self, bit_offset, bitspan):
-        offsets = self.subregion_ranges()
-
-        for pairing in offsets:
-            start, end = pairing
-            end_region = bit_offset + bitspan
-
-            # overwrites entire subregion
-            if bit_offset < start and end_region >= end:
-                return True
-
-            # offset starts in middle of subregion
-            if start < bit_offset <= end:
-                return True
-
-            # offset ends in middle of subregion
-            if start <= end_region <= end:
+            if end_region > start and end_region <= end:
                 return True
 
         return False
 
     def next_subregion_offset(self):
+        if self.overlaps:
+            return 0
+        
         offsets = self.subregion_ranges()
 
         if len(offsets) == 0:
@@ -199,10 +199,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return id(decl) in self.subregions
 
     def declare_subregion(self, decl, bit_offset=None):
-        if inspect.isclass(decl) and issubclass(decl, MemoryRegion):
-            decl = decl.declare()
-        elif not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object or MemoryRegion class')
+        if not isinstance(decl, declaration.Declaration):
+            raise MemoryRegionError('decl must be a Declaration object')
 
         if self.has_subregion(decl):
             raise MemoryRegionError('region already has subregion declaration')
@@ -213,12 +211,12 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             bit_offset = align(bit_offset, decl.alignment())
         
         if self.in_subregion(bit_offset, decl.bitspan()):
-            raise MemoryRegionError('subregion declaration overwrites another subregion')
+             raise MemoryRegionError('subregion declaration overwrites another subregion')
 
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
 
-        if decl.bitspan() > self.shifted_bitspan():
+        if bit_offset+decl.bitspan() > self.shifted_bitspan():
             try:
                 self.accomodate_subregion(decl, decl.bitspan())
             except Exception,e:
@@ -302,7 +300,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         current_offset = self.subregion_offsets[id(decl)]
 
-        if self.overwrites_subregion(current_offset, new_size):
+        if self.in_subregion(current_offset, new_size, True):
             raise MemoryRegionError('accomodation overwrites another region')
 
         new_size = current_offset + new_size

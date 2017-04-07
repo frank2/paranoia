@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import copy
 import inspect
 
 from paranoia.meta import list as d_list
@@ -10,121 +11,95 @@ __all__ = ['MappingError', 'Mapping']
 class MappingError(d_list.ListError):
     pass
 
-class NewMapping(d_list.List):
-    FIELDS = None
-
-    def __init__(self, **kwargs):
-        fields = kwargs.setdefault('fields', self.FIELDS)
-
-        if fields is None or not getattr(fields, '__iter__', None):
-            raise MappingError('fields must be pairs of names and Declaration or MemoryRegion types')
-
-        self.parse_fields(fields)
-        kwargs['declarations'] = self.declarations
-
-        NewList.__init__(self, **kwargs)
-
-    def parse_fields(self, fields):
-        field_map = dict()
-        anon_map = dict()
-        declarations = list()
-        
-        anonymous_fields = 0
-
-        for field_pair in fields:
-            if not len(field_pair) == 2:
-                raise MappingError('field_pair must be a tuple of name and Declaration or MemoryRegion')
-
-            fieldname, decl = field_pair
-
-            if inspect.isclass(decl) and issubclass(decl, memory_region.MemoryRegion):
-                decl = decl.declare()
-            elif not isinstance(decl, declaration.Declaration):
-                raise MappingError('decl must be either a Declaration or a MemoryRegion')
-
-            if fieldname is None:
-                if not issubclass(decl.base_class, Mapping):
-                    raise MappingError('only mapping objects can have anonymous fields')
-
-                field_name = '__anon_field%04X' % anonymous_fields
-                anonymous_fields += 1
-                anon_fields = decl.args.get('fields', None) or decl.base_class.FIELDS
-
-                if not anon_fields:
-                    raise MappingError('no fields in mapping object')
-                
-            self.field_map[fieldname] = id(decl)
-            self.declarations.append(decl)
-
 class Mapping(d_list.List):
     FIELDS = None
 
     def __init__(self, **kwargs):
-        fields = kwargs.setdefault('fields', self.FIELDS)
-
-        if fields is None or not getattr(fields, '__iter__', None):
-            raise StructureError('fields must be pairs of names and Declaration types')
-
-        copy_declarations = kwargs.setdefault('copy_declarations', self.COPY_DECLARATIONS)
-
-        self.parse_fields(fields, copy_declarations)
-        kwargs['declarations'] = self.declarations # for initializing bitspan
-        kwargs['copy_declarations'] = False # already done
-
         d_list.List.__init__(self, **kwargs)
-
-    def parse_fields(self, fields, copy_declarations):
-        self.declarations = list()
-        self.declaration_map = dict()
-        self.field_map = dict()
-        self.anon_map = dict()
-        size_hints = list()
-        anonymous_fields = 0
-
-        for i in range(len(fields)):
-            pair = fields[i]
-            if not len(pair) == 2 and not isinstance(pair[0], str) and not pair[0] == None and not isinstance(pair[1], declaration.Declaration):
-                raise MappingError('field_declaration element must be a pair consisting of a string or None paired with a Declaration.')
+        self.binding_complete = False
             
-            name, declaration_obj = pair
+        self.field_map, self.anon_map, self.declarations = self.parse_fields(self.declaration)
+        self.map_declarations()
+        self.binding_complete = True
 
-            if copy_declarations:
-                declaration_obj = declaration_obj.copy()
+    def parse_fields(self, decl):
+        if not isinstance(decl, declaration.Declaration):
+            raise MappingError('decl must be a Declaration object')
+        
+        fields = decl.args.get('fields', None)
+
+        if fields is None and not decl.base_class.FIELDS is None:
+            fields = map(lambda x: [x[0], copy.copy(x[1])], decl.base_class.FIELDS)
+
+        # we need to modify the fields, change this
+        if isinstance(fields, tuple):
+            fields = list(fields)
+
+        if fields is None or not isinstance(fields, list):
+            raise MappingError('fields must be pairs of names and Declaration or MemoryRegion types')
+
+        field_map = dict()
+        anon_map = dict()
+        declarations = list()
+
+        for field_index in xrange(len(fields)):
+            field_pair = fields[field_index]
+
+            if not len(field_pair) == 2:
+                raise MappingError('field_pair must be a pair of name and Declaration or MemoryRegion')
+
+            if isinstance(field_pair, tuple):
+                # needs to be modified, fix it
+                fields[field_index] = list(field_pair)
+                field_pair = fields[field_index]
+
+            fieldname, field_decl = field_pair
+            field_decl = memory_region.ensure_declaration(field_decl)
+            field_pair[1] = field_decl
+
+            if fieldname in field_map:
+                raise MappingError('field name already in field map')
+
+            if fieldname is None:
+                fieldname = '__anon_field_%X' % id(field_decl)
+                sub_anon_map = self.parse_anonymous_field(field_decl)
+
+                for anon_field in sub_anon_map:
+                    if anon_field in field_map or anon_field in anon_map:
+                        raise MappingError('either anonymously named mapping or another field is already taking up the name %s' % anon_name)
+
+                    anon_map[anon_field] = sub_anon_map[anon_field]
+
+            declarations.append(field_decl)
+            field_map[fieldname] = id(field_decl)
+
+        decl.set_arg('fields', fields)
+        return (field_map, anon_map, declarations)
+
+    def parse_anonymous_field(self, decl):
+        if not isinstance(decl, declaration.Declaration):
+            raise MappingError('decl must be a Declaration object')
+        
+        anon_map = dict()
+        
+        if not issubclass(decl.base_class, Mapping):
+            raise MappingError('only mapping objects can have anonymous fields')
+
+        anon_field_map, anon_anon_map, anon_decls = self.parse_fields(decl)
                 
-            declaration_hash = hash(declaration_obj)
-
-            if d_list.is_size_hint(declaration_obj):
-                size_hints.append(declaration_obj)
-
-            if name == None:
-                if not issubclass(declaration_obj.base_class, Mapping):
-                    raise MappingError('only Mapping types can be anonymously named')
-                
-                name = '__anon_field%04d' % anonymous_fields
-                anonymous_fields += 1
-                found_fields = declaration_obj.args.get('fields', None) or declaration_obj.base_class.FIELDS
-
-                if not found_fields:
-                    raise MappingError('no fields in declaration object')
-
-                for anon_field in found_fields:
-                    anon_name, anon_decl = anon_field
-
-                    if anon_name in self.anon_map or anon_name in self.field_map:
-                        raise MappingError('either another anonymously named mapping or another field is already taking up the name %s' % anon_name)
-
-                    self.anon_map[anon_name] = name
-                
-            self.declarations.append(declaration_obj)
+        for anon_field in anon_field_map:
+            if anon_field in anon_map:
+                raise MappingError('anon field name already in anon map')
             
-            if name in self.field_map:
-                raise StructureError('%s already defined in structure' % name)
+            anon_map[anon_field] = id(decl)
 
-            self.field_map[name] = declaration_hash
+        for anon_field in anon_anon_map:
+            if anon_field in anon_map:
+                raise MappingError('anon field name already in anon map')
 
-        for hint in size_hints:
-            hint.set_arg('resolved_declaration'
-                         ,self.field_map[hint.get_arg('target_declaration')])
+            anon_map[anon_field] = id(decl)
+
+        return anon_map
 
     def __getattr__(self, attr):
         if 'field_map' not in self.__dict__ and 'anon_map' not in self.__dict__ and attr not in self.__dict__:
@@ -133,17 +108,18 @@ class Mapping(d_list.List):
         field_map = self.__dict__['field_map']
         anon_map = self.__dict__['anon_map']
 
-        if attr in field_map:
-            decl_hash = field_map[attr]
-            return self.instantiate(decl_hash)
-        elif attr in anon_map:
-            mapping = anon_map[attr]
+        if attr in field_map or attr in anon_map:
+            decl_id = field_map[attr]
 
-            if mapping not in field_map:
-                raise AttributeError(mapping)
+            if not decl_id in self.declaration_index:
+                raise AttributeError(attr)
             
-            index = field_map[mapping]
-            return getattr(self.instantiate(index), attr)
+            offset = self.declaration_index[decl_id]
+
+            if attr in anon_map:
+                return getattr(self.instantiate(offset), attr)
+            else:
+                return self.instantiate(offset)
         elif attr in self.__dict__:
             return self.__dict__[attr]
         else:
@@ -151,41 +127,19 @@ class Mapping(d_list.List):
 
     @classmethod
     def static_bitspan(cls, **kwargs):
-        return sum([x[1].bitspan() for x in kwargs.setdefault('fields', cls.FIELDS)])
+        fields = kwargs.setdefault('fields', cls.FIELDS)
+        decls = map(lambda x: memory_region.ensure_declaration(x[1]), fields)
+        overlaps = kwargs.setdefault('overlaps', cls.OVERLAPS)
+        
+        return cls.declarative_size(overlaps, declarations)
 
     @classmethod
-    def simple(cls, declarations):
-        new_mapping_declaration = list()
+    def static_declaration(cls, **kwargs):
+        kwargs.setdefault('fields', cls.FIELDS)
 
-        if not getattr(declarations, '__iter__', None):
-            raise MappingError('declarations must be a sequence of names, a base class and optional arguments')
+        super_class = super(Mapping, cls).static_declaration(**kwargs)
 
-        if len(declarations) == 0:
-            raise MappingError('empty declaration list given')
+        class StaticMapping(super_class):
+            FIELDS = kwargs['fields']
 
-        for declaration_obj in declarations:
-            if not len(declaration_obj) == 2 and not len(declaration_obj) == 3:
-                raise MappingError('simple declaration item has invalid arguments')
-
-            if not isinstance(declaration_obj[0], str) and not declaration_obj[0] == None:
-                raise MappingError('first argument of the declaration must be a string or None')
-
-            if not issubclass(declaration_obj[1], memory_region.MemoryRegion):
-                raise MappingError('second argument must be a base class implementing MemoryRegion')
-
-            if len(declaration_obj) == 3 and not isinstance(declaration_obj[2], dict):
-                raise MappingError('optional third argument must be a dictionary of arguments')
-                
-            if not len(declaration_obj) == 3:
-                args = dict()
-            else:
-                args = declaration_obj[2]
-
-            new_mapping_declaration.append([declaration_obj[0]
-                                            ,declaration.Declaration(base_class=declaration_obj[1]
-                                                                     ,args=args)])
-        
-        class SimplifiedMapping(cls):
-            FIELDS = new_mapping_declaration[:]
-
-        return SimplifiedMapping    
+        return StaticMapping

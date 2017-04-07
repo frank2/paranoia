@@ -18,15 +18,10 @@ class Array(d_list.List):
     def __init__(self, **kwargs):
         self.base_declaration = kwargs.setdefault('base_declaration', self.BASE_DECLARATION)
 
-        if inspect.isclass(self.base_declaration) and issubclass(self.base_declaration, memory_region.MemoryRegion):
-            self.base_declaration = self.base_declaration.declare()
-
         if self.base_declaration is None:
             raise ArrayError('base declaration cannot be None')
 
-        if not isinstance(self.base_declaration, declaration.Declaration):
-            raise ArrayError('base_declaration must be a Declaration instance or MemoryRegion type')
-        
+        self.base_declaration = memory_region.ensure_declaration(self.base_declaration)
         self.elements = kwargs.setdefault('elements', self.ELEMENTS)
 
         kwargs['declarations'] = [self.base_declaration.copy() for i in xrange(self.elements)]
@@ -34,13 +29,19 @@ class Array(d_list.List):
         d_list.List.__init__(self, **kwargs)
 
     def set_elements(self, elements):
-        if self.bind and self.binding_complete:
-            raise ArrayError('cannot resize bound array')
-
         self.elements = elements
         self.parse_elements()
 
+    def get_elements(self):
+        return self.elements
+
     def parse_elements(self):
+        if self.elements == len(self.declarations):
+            return
+        
+        if self.is_bound():
+            raise ArrayError('cannot resize bound array')
+
         if self.elements < len(self.declarations):
             for i in range(self.elements, len(self.declarations)):
                 self.remove_declaration(self.elements)

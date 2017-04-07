@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import copy
 import inspect
 
 from paranoia.base import declaration, memory_region, size_hint, paranoia_agent
@@ -20,32 +21,25 @@ class ListError(paranoia_agent.ParanoiaError):
 
 class List(memory_region.MemoryRegion):
     DECLARATIONS = None
-    BIND = False
-    OVERLAPS = False
 
     def __init__(self, **kwargs):
         self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
-
-        for i in xrange(len(self.declarations)):
-            if inspect.isclass(self.declarations[i]) and issubclass(self.declarations[i], memory_region.MemoryRegion):
-                self.declarations[i] = self.declarations[i].declare()
-                
-        # if the declarations come from the class definition, copy the instances
-        if self.declarations == self.DECLARATIONS:
-            self.declarations = map(declaration.Declaration.copy, self.declarations)
+        self.declaration_index = dict()
             
         if self.declarations is None:
             self.declarations = list()
 
+        # if the declarations come from the class definition, copy the instances
+        if self.declarations == self.DECLARATIONS:
+            self.declarations = map(copy.copy, self.declarations)
+
         if not isinstance(self.declarations, list):
             raise ListError('declarations must be a list of Declaration objects')
 
-        for d in self.declarations:
-            if not isinstance(d, declaration.Declaration):
-                raise ListError('declarations must be a list of Declaration objects')
+        self.declarations = map(memory_region.ensure_declaration, self.declarations)
 
-        kwargs.setdefault('bitspan', self.declarative_size())
+        kwargs.setdefault('bitspan', List.declarative_size(self.overlaps, self.declarations))
 
         memory_region.MemoryRegion.__init__(self, **kwargs)
 
@@ -53,31 +47,14 @@ class List(memory_region.MemoryRegion):
         self.map_declarations()
         self.binding_complete = True
 
-    def declarative_size(self):
-        size = 0
-        offset = 0
-
-        for decl in self.declarations:
-            if self.overlaps:
-                if decl.bitspan() > size:
-                    size = decl.bitspan()
-            else:
-                size = align(offset, decl.alignment()) + decl.bitspan()
-                offset = size
-
-        return size
-
     def map_declarations(self):
         if self.is_bound():
             raise ListError('cannot remap bound list')
-        
-        # in some cases we might have declarations inserted before this is called 
-        for decl in self.declarations:
-            if not self.has_subregion(decl):
-                if self.overlaps:
-                    self.declare_subregion(decl, 0)
-                else:
-                    self.declare_subregion(decl)
+
+        for i in xrange(len(self.declarations)):
+            decl = self.declarations[i]
+            self.declare_subregion(decl)
+            self.declaration_index[id(decl)] = i
 
     def movement_deltas(self, index, init_delta):
         if index >= len(self.declarations) or self.overlaps:
@@ -108,17 +85,12 @@ class List(memory_region.MemoryRegion):
         if self.is_bound():
             raise ListError('cannot alter declarations of bound list after instantiation')
 
-        if inspect.isclass(decl) and isinstance(decl, memory_region.MemoryRegion):
-            decl = decl.declare()
-
-        if not isinstance(decl, declaration.Declaration):
-            raise ListError('decl must be a Declaration object')
-        
+        decl = memory_region.ensure_declaration(decl)
         deltas = self.movement_deltas(index, decl.bitspan())
         self.declarations.insert(index, decl)
 
         try:
-            self.resize(self.declarative_size())
+            self.resize(List.declarative_size(self.overlaps, self.declarations))
         except Exception,e:
             self.declarations.pop(index)
             raise e
@@ -132,11 +104,14 @@ class List(memory_region.MemoryRegion):
             for offset in targets:
                 self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
 
+        self.declaration_index[id(decl)] = index
+
         if self.overlaps:
             index = 0
 
         if not index == 0:
             prev_decl = self.declarations[index-1]
+            print self.subregions.keys(), id(prev_decl)
             prev_offset = self.subregion_offsets[id(prev_decl)]
             prev_size = prev_decl.bitspan()
             index = align(prev_offset + prev_size, decl.alignment())
@@ -159,6 +134,8 @@ class List(memory_region.MemoryRegion):
             self.declarations.insert(index, removed_decl)
             raise e
 
+        del self.declaration_index[id(removed_decl)]
+
         if not deltas is None:
             targets = deltas.keys()
             targets.sort()
@@ -167,7 +144,7 @@ class List(memory_region.MemoryRegion):
             for offset in targets:
                 self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
 
-        self.resize(self.declarative_size())
+        self.resize(self.declarative_size(self.overlaps, self.declarations))
 
     def append_declaration(self, decl):
         self.insert_declaration(len(self.declarations), decl)
@@ -199,20 +176,15 @@ class List(memory_region.MemoryRegion):
         for i in xrange(len(self)):
             yield self.instantiate(i)
 
-    @classmethod
-    def static_bitspan(cls, **kwargs):
-        declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
-
-        for i in xrange(len(declarations)):
-            if inspect.isclass(declarations[i]) and issubclass(declarations[i], memory_region.MemoryRegion):
-                declarations[i] = declarations[i].declare()
-                
-        overlaps = kwargs.setdefault('overlaps', cls.OVERLAPS)
+    @staticmethod
+    def declarative_size(overlap, declarations):
         size = 0
         offset = 0
 
         for decl in declarations:
-            if overlaps:
+            decl = memory_region.ensure_declaration(decl)
+            
+            if overlap:
                 if decl.bitspan() > size:
                     size = decl.bitspan()
             else:
@@ -222,16 +194,20 @@ class List(memory_region.MemoryRegion):
         return size
 
     @classmethod
+    def static_bitspan(cls, **kwargs):
+        declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
+        declarations = map(memory_region.ensure_declaration, declarations)
+        overlaps = kwargs.setdefault('overlaps', cls.OVERLAPS)
+
+        return cls.declarative_size(overlaps, declarations)
+
+    @classmethod
     def static_declaration(cls, **kwargs):
         kwargs.setdefault('declarations', cls.DECLARATIONS)
-        kwargs.setdefault('bind', cls.BIND)
-        kwargs.setdefault('overlaps', cls.OVERLAPS)
 
         super_class = super(List, cls).static_declaration(**kwargs)
 
         class StaticList(super_class):
             DECLARATIONS = kwargs['declarations']
-            BIND = kwargs['bind']
-            OVERLAPS = kwargs['overlaps']
 
         return StaticList
