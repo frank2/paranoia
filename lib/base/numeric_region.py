@@ -15,7 +15,6 @@ class NumericRegion(memory_region.MemoryRegion):
     UNSIGNED = 0
     SIGNED = 1
     SIGNAGE = 0
-    VALUE = None
 
     # TODO setattr/getattr to intercept rewrites of value
 
@@ -31,11 +30,6 @@ class NumericRegion(memory_region.MemoryRegion):
             raise NumericRegionError('signage must be NumericRegion.SIGNED or NumericRegion.UNSIGNED')
 
         memory_region.MemoryRegion.__init__(self, **kwargs)
-
-        value = kwargs.setdefault('value', self.VALUE)
-
-        if not value is None:
-            self.set_value(value)
 
     def get_value(self):
         bitlist = self.read_bits_from_bytes(self.bitspan)
@@ -83,7 +77,7 @@ class NumericRegion(memory_region.MemoryRegion):
         if not self.declaration is None:
             self.declaration.set_arg('value', value)
 
-        if self.alignment == self.ALIGN_BYTE:
+        if self.alignment % 8 == 0:
             while bitspan > 0:
                 bytelist.append(value & 0xFF)
                 value >>= 8
@@ -96,7 +90,7 @@ class NumericRegion(memory_region.MemoryRegion):
             bitspan_content = bytelist_to_bitlist(bytelist)
 
             self.write_bits(bitspan_content)
-        elif self.alignment == self.ALIGN_BIT:
+        else:
             bits = 0
             bitlist = list()
 
@@ -117,16 +111,14 @@ class NumericRegion(memory_region.MemoryRegion):
         return self.get_value()
 
     @classmethod
-    def static_declaration(cls, **kwargs):
+    def subclass(cls, **kwargs):
         kwargs.setdefault('endianness', cls.ENDIANNESS)
         kwargs.setdefault('signage', cls.SIGNAGE)
-        kwargs.setdefault('value', cls.VALUE)
 
-        super_class = super(NumericRegion, cls).static_declaration(**kwargs)
+        super_class = super(NumericRegion, cls).subclass(**kwargs)
 
-        class StaticNumericRegion(super_class):
+        class SubclassedNumericRegion(super_class):
             ENDIANNESS = kwargs['endianness']
             SIGNAGE = kwargs['signage']
-            VALUE = kwargs['value']
 
-        return StaticNumericRegion
+        return SubclassedNumericRegion

@@ -138,7 +138,7 @@ class FloatStub(object):
     def __float__(self):
         return self.get_value()    
 
-FloatStruct = Structure.static_declaration(fields=[
+FloatStruct = Structure.subclass(fields=[
         ('sign', Bitfield.declare(bitspan=1))
         ,('exponent', Bitfield.declare(bitspan=8))
         ,('fraction', Bitfield.declare(bitspan=23))])
@@ -148,7 +148,7 @@ class Float(FloatStruct, FloatStub):
         FloatStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-DoubleStruct = Structure.static_declaration(fields=[
+DoubleStruct = Structure.subclass(fields=[
         ('sign', Bitfield.declare(bitspan=1))
         ,('exponent', Bitfield.declare(bitspan=11))
         ,('fraction', Bitfield.declare(bitspan=52))])
@@ -158,7 +158,7 @@ class Double(DoubleStruct, FloatStub):
         DoubleStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-LongDoubleStruct = Structure.static_declaration(fields=[
+LongDoubleStruct = Structure.subclass(fields=[
         ('sign', Bitfield.declare(bitspan=1))
         ,('exponent', Bitfield.declare(bitspan=15))
         ,('fraction', Bitfield.declare(bitspan=63))])
@@ -168,7 +168,7 @@ class LongDouble(LongDoubleStruct, FloatStub):
         LongDoubleStruct.__init__(self, **kwargs)
         FloatStub.__init__(self, **kwargs)
 
-DoubleDoubleStruct = Structure.static_declaration(fields=[
+DoubleDoubleStruct = Structure.subclass(fields=[
         ('sign', Bitfield.declare(bitspan=1))
         ,('exponent', Bitfield.declare(bitspan=15))
         ,('fraction', Bitfield.declare(bitspan=112))])

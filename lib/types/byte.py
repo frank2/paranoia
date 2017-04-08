@@ -9,7 +9,7 @@ class Byte(numeric_region.NumericRegion):
     BITSPAN = 8
 
 class ByteArray(array.Array):
-    BASE_CLASS = Byte
+    BASE_DECLARATION = Byte
 
     def __str__(self):
         result = list()

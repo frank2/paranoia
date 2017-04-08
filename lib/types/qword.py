@@ -9,4 +9,4 @@ class Qword(numeric_region.NumericRegion):
     BITSPAN = 64
 
 class QwordArray(array.Array):
-    BASE_CLASS = Qword
+    BASE_DECLARATION = Qword

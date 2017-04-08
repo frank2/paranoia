@@ -48,13 +48,17 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     PARENT_REGION = None
     ALLOCATOR_CLASS = allocator.Allocator
     ALLOCATOR = None
-    STRING_DATA = None
+    DATA = None
+    VALUE = None
     INVALIDATED = False
     ZERO_MEMORY = True
     BIND = False
     OVERLAPS = False
+    READ_MEMORY = False
+    STATIC = False
     MAXIMUM_SIZE = 0
     BITSHIFT = 0
+    HINT = None
     ALIGNMENT = 8
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
@@ -88,20 +92,27 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.bind = kwargs.setdefault('bind', self.BIND)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
         self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
+        self.static = False # change this at the end of the constructor
         self.subregions = dict()
         self.subregion_offsets = dict()
-        self.binding_complete = False
+        self.init_finished = False
         
-        string_data = kwargs.setdefault('string_data', self.STRING_DATA)
+        data = kwargs.setdefault('data', self.DATA)
+        value = kwargs.setdefault('value', self.VALUE)
+        read_memory = kwargs.setdefault('read_memory', self.READ_MEMORY)
+        hint = kwargs.setdefault('hint', self.HINT)
 
-        if not string_data is None and not isinstance(string_data, str):
-            raise MemoryRegionError('string_data must be a string')
+        if not data is None and not isinstance(data, str):
+            raise MemoryRegionError('data must be a string')
 
         if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
             raise MemoryRegionError('allocation must implement allocator.Allocation')
 
-        if self.bitspan is None and not string_data is None:
-            self.bitspan = len(string_data)*8
+        if not hint is None:
+            self.resolve_hint(hint)
+
+        if self.bitspan is None and not data is None:
+            self.bitspan = len(data)*8
 
         if not issubclass(self.allocator_class, allocator.Allocator):
             raise MemoryRegionError('allocator class must implement allocator.Allocator')
@@ -136,16 +147,39 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if self.zero_memory and self.is_allocated() and not self.bitspan == 0:
             self.write_bits([0] * self.bitspan)
 
-        if not string_data is None:
-            self.parse_string_data(string_data)
+        if read_memory:
+            data = self.read_bytes(self.shifted_bytespan())
 
-        self.binding_complete = True
+        if not data is None:
+            self.parse_data(data)
+
+        if not value is None:
+            self.set_value(value)
+
+        self.static = kwargs.setdefault('static', self.STATIC)
+        self.init_finished = True
+
+    def resolve_hint(self, hint):
+        attrs = hint.split('.')
+
+        obj = self.parent_region
+
+        if obj is None:
+            raise MemoryRegionError('cannot hint on parentless region')
+
+        for attr in attrs:
+            obj = getattr(obj, attr)
+
+        if isinstance(obj, MemoryRegion):
+            self.bitspan = obj.get_value()
+        elif callable(obj):
+            obj(self)
 
     def is_bound(self):
-        return self.bind and self.binding_complete
+        return self.bind and self.init_finished
 
-    def parse_string_data(self, string_data):
-        self.write_bytes(list(map(ord, string_data)))
+    def parse_data(self, data):
+        self.write_bytes(list(map(ord, data)))
 
     def subregion_ranges(self):
         regions = self.subregion_offsets.items()
@@ -160,6 +194,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
     def in_subregion(self, bit_offset, bitspan, skip_same=False):
         if self.overlaps:
+            return False
+
+        if bitspan == 0:
             return False
         
         offsets = self.subregion_ranges()
@@ -322,15 +359,14 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         current_offset = self.subregion_offsets[id(decl)]
 
         self.remove_subregion(decl)
-        
-        new_size = current_offset + new_size
-        old_size = decl.args['bitspan']
-        decl.args['bitspan'] = new_size
+
+        old_size = decl.get_arg('bitspan')
+        decl.set_arg('bitspan', new_size)
 
         try:
             self.declare_subregion(decl, current_offset)
         except Exception, e:
-            decl.args['bitspan'] = old_size
+            decl.set_arg('bitspan', old_size)
             raise e
 
         if not decl.instance is None:
@@ -465,6 +501,9 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def write_bytestring(self, string_val, byte_offset=0):
         if self.invalidated:
             raise MemoryRegionError('memory region has been invalidated')
+
+        if self.static:
+            raise MemoryRegionError('cannot write to a static region')
         
         if (len(string_val)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
             raise MemoryRegionError('list plus offset exceeds memory region boundary')
@@ -648,6 +687,12 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
                 
             byte_iterator += 1
 
+    def set_value(self, value):
+        raise MemoryRegionError('MemoryRegion does not implement set_value')
+
+    def get_value(self, value):
+        raise MemoryRegionError('MemoryRegion does not implement get_value')
+
     def __hash__(self):
         return hash('%X/%d/%d' % (int(self.memory_base), self.bitspan, self.bitshift))
 
@@ -676,22 +721,42 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         return int(align(bitspan, alignment) / 8)
 
     @classmethod
-    def static_declaration(cls, **kwargs):
-        kwargs.setdefault('auto_allocate', cls.AUTO_ALLOCATE)
-        kwargs.setdefault('parent_region', cls.PARENT_REGION)
+    def subclass(cls, **kwargs):
         kwargs.setdefault('allocator_class', cls.ALLOCATOR_CLASS)
         kwargs.setdefault('allocator', cls.ALLOCATOR)
+        kwargs.setdefault('allocation', cls.ALLOCATION)
+        kwargs.setdefault('alignment', cls.ALIGNMENT)
+        kwargs.setdefault('auto_allocate', cls.AUTO_ALLOCATE)
+        kwargs.setdefault('parent_region', cls.PARENT_REGION)
         kwargs.setdefault('bitspan', cls.BITSPAN)
-        kwargs.setdefault('memory_base', cls.MEMORY_BASE)
         kwargs.setdefault('bitshift', cls.BITSHIFT)
+        kwargs.setdefault('memory_base', cls.MEMORY_BASE)
+        kwargs.setdefault('invalidated', cls.INVALIDATED)
+        kwargs.setdefault('zero_memory', cls.ZERO_MEMORY)
+        kwargs.setdefault('bind', cls.BIND)
+        kwargs.setdefault('overlaps', cls.OVERLAPS)
+        kwargs.setdefault('maximum_size', cls.MAXIMUM_SIZE)
+        kwargs.setdefault('data', cls.DATA)
+        kwargs.setdefault('value', cls.VALUE)
+        kwargs.setdefault('read_memory', cls.READ_MEMORY)
 
-        class StaticMemoryRegion(cls):
-            AUTO_ALLOCATE = kwargs['auto_allocate']
-            PARENT_REGION = kwargs['parent_region']
+        class SubclassedMemoryRegion(cls):
             ALLOCATOR_CLASS = kwargs['allocator_class']
             ALLOCATOR = kwargs['allocator']
+            ALLOCATION = kwargs['allocation']
+            ALIGNMENT = kwargs['alignment']
+            AUTO_ALLOCATE = kwargs['auto_allocate']
+            PARENT_REGION = kwargs['parent_region']
             BITSPAN = kwargs['bitspan']
-            MEMORY_BASE = kwargs['memory_base']
             BITSHIFT = kwargs['bitshift']
+            MEMORY_BASE = kwargs['memory_base']
+            INVALIDATED = kwargs['invalidated']
+            ZERO_MEMORY = kwargs['zero_memory']
+            BIND = kwargs['bind']
+            OVERLAPS = kwargs['overlaps']
+            MAXIMUM_SIZE = kwargs['maximum_size']
+            DATA = kwargs['data']
+            VALUE = kwargs['value']
+            READ_MEMORY = kwargs['read_memory']
 
-        return StaticMemoryRegion
+        return SubclassedMemoryRegion

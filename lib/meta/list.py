@@ -43,9 +43,9 @@ class List(memory_region.MemoryRegion):
 
         memory_region.MemoryRegion.__init__(self, **kwargs)
 
-        self.binding_complete = False
+        self.init_finished = False
         self.map_declarations()
-        self.binding_complete = True
+        self.init_finished = True
 
     def map_declarations(self):
         if self.is_bound():
@@ -55,6 +55,10 @@ class List(memory_region.MemoryRegion):
             decl = self.declarations[i]
             self.declare_subregion(decl)
             self.declaration_index[id(decl)] = i
+
+            if 'hint' in decl.args:
+                # this declaration alters the size at runtime, instantiate it to trigger a resize
+                self.instantiate(i)
 
     def movement_deltas(self, index, init_delta):
         if index >= len(self.declarations) or self.overlaps:
@@ -111,7 +115,6 @@ class List(memory_region.MemoryRegion):
 
         if not index == 0:
             prev_decl = self.declarations[index-1]
-            print self.subregions.keys(), id(prev_decl)
             prev_offset = self.subregion_offsets[id(prev_decl)]
             prev_size = prev_decl.bitspan()
             index = align(prev_offset + prev_size, decl.alignment())
@@ -152,6 +155,7 @@ class List(memory_region.MemoryRegion):
     def instantiate(self, index, **kwargs):
         decl = self.declarations[index]
         offset = self.subregion_offsets[id(decl)]
+        kwargs.setdefault('parent_region', self)
 
         if decl.instance is None or kwargs.has_key('reinstance') and kwargs['reinstance'] == True:
             return decl.instantiate(**kwargs)
@@ -188,7 +192,9 @@ class List(memory_region.MemoryRegion):
                 if decl.bitspan() > size:
                     size = decl.bitspan()
             else:
-                size = align(offset, decl.alignment()) + decl.bitspan()
+                if not decl.bitspan() == 0:
+                    size = align(offset, decl.alignment()) + decl.bitspan()
+                    
                 offset = size
 
         return size
@@ -202,12 +208,12 @@ class List(memory_region.MemoryRegion):
         return cls.declarative_size(overlaps, declarations)
 
     @classmethod
-    def static_declaration(cls, **kwargs):
+    def subclass(cls, **kwargs):
         kwargs.setdefault('declarations', cls.DECLARATIONS)
 
-        super_class = super(List, cls).static_declaration(**kwargs)
+        super_class = super(List, cls).subclass(**kwargs)
 
-        class StaticList(super_class):
+        class SubclassedList(super_class):
             DECLARATIONS = kwargs['declarations']
 
-        return StaticList
+        return SubclassedList

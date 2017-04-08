@@ -15,12 +15,16 @@ class Mapping(d_list.List):
     FIELDS = None
 
     def __init__(self, **kwargs):
-        d_list.List.__init__(self, **kwargs)
-        self.binding_complete = False
+        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
+
+        if self.declaration is None:
+            self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
             
+        self.declaration = memory_region.ensure_declaration(self.declaration)
         self.field_map, self.anon_map, self.declarations = self.parse_fields(self.declaration)
-        self.map_declarations()
-        self.binding_complete = True
+        kwargs['declarations'] = self.declarations
+        
+        d_list.List.__init__(self, **kwargs)
 
     def parse_fields(self, decl):
         if not isinstance(decl, declaration.Declaration):
@@ -109,7 +113,10 @@ class Mapping(d_list.List):
         anon_map = self.__dict__['anon_map']
 
         if attr in field_map or attr in anon_map:
-            decl_id = field_map[attr]
+            if attr in field_map:
+                decl_id = field_map[attr]
+            elif attr in anon_map:
+                decl_id = anon_map[attr]
 
             if not decl_id in self.declaration_index:
                 raise AttributeError(attr)
@@ -131,15 +138,15 @@ class Mapping(d_list.List):
         decls = map(lambda x: memory_region.ensure_declaration(x[1]), fields)
         overlaps = kwargs.setdefault('overlaps', cls.OVERLAPS)
         
-        return cls.declarative_size(overlaps, declarations)
+        return cls.declarative_size(overlaps, decls)
 
     @classmethod
-    def static_declaration(cls, **kwargs):
+    def subclass(cls, **kwargs):
         kwargs.setdefault('fields', cls.FIELDS)
 
-        super_class = super(Mapping, cls).static_declaration(**kwargs)
+        super_class = super(Mapping, cls).subclass(**kwargs)
 
-        class StaticMapping(super_class):
+        class SubclassedMapping(super_class):
             FIELDS = kwargs['fields']
 
-        return StaticMapping
+        return SubclassedMapping

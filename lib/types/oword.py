@@ -9,4 +9,4 @@ class Oword(numeric_region.NumericRegion):
     BITSPAN = 128
 
 class OwordArray(array.Array):
-    BASE_CLASS = Oword
+    BASE_DECLARATION = Oword

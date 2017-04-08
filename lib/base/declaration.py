@@ -3,6 +3,8 @@
 from paranoia.base import paranoia_agent
 from paranoia.converters import dict_merge
 
+import traceback
+
 __all__ = ['DeclarationError', 'Declaration']
 
 class DeclarationError(paranoia_agent.ParanoiaError):

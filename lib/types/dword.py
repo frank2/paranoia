@@ -9,4 +9,4 @@ class Dword(numeric_region.NumericRegion):
     BITSPAN = 32
 
 class DwordArray(array.Array):
-    BASE_CLASS = Dword
+    BASE_DECLARATION = Dword

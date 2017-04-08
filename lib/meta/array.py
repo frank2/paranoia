@@ -30,7 +30,7 @@ class Array(d_list.List):
 
     def set_elements(self, elements):
         self.elements = elements
-        self.parse_elements()
+        # the rest is handled by __setattr__
 
     def get_elements(self):
         return self.elements
@@ -51,6 +51,20 @@ class Array(d_list.List):
 
             for i in range(element_delta):
                 self.append_declaration(self.base_declaration.copy())
+                            
+    def __setattr__(self, attr, value):
+        if attr == 'elements':
+            if 'elements' in self.__dict__:
+                self.__dict__['elements'] = value
+
+                if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
+                    self.__dict__['declaration'].set_arg('elements', value)
+
+                self.parse_elements()
+            else:
+                self.__dict__[attr] = value
+        else:
+            super(Array, self).__setattr__(attr, value)
 
     @classmethod
     def static_bitspan(cls, **kwargs):
@@ -59,19 +73,20 @@ class Array(d_list.List):
         if base_decl is None:
             raise ArrayError('no base declaration to get base bitspan from')
 
+        base_decl = memory_region.ensure_declaration(base_decl)
         base_bitspan = base_decl.bitspan()
         elements = kwargs.setdefault('elements', cls.ELEMENTS)
         return base_bitspan * elements
         
     @classmethod
-    def static_declaration(cls, **kwargs):
+    def subclass(cls, **kwargs):
         kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
         kwargs.setdefault('elements', cls.ELEMENTS)
 
-        super_class = super(Array, cls).static_declaration(**kwargs)
+        super_class = super(Array, cls).subclass(**kwargs)
 
-        class StaticArray(super_class):
+        class SubclassedArray(super_class):
             BASE_DECLARATION = kwargs['base_declaration']
             ELEMENTS = kwargs['elements']
 
-        return StaticArray
+        return SubclassedArray
