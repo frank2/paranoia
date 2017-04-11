@@ -105,6 +105,34 @@ class Mapping(d_list.List):
 
         return anon_map
 
+    def get_field_declaration(self, field):
+        if field in self.field_map:
+            decl_id = self.field_map[field]
+        else:
+            raise AttributeError(field)
+
+        if not decl_id in self.declaration_index:
+            raise AttributeError(field)
+            
+        offset = self.declaration_index[decl_id]
+        return (offset, self.declarations[offset])
+
+    def get_field(self, field):
+        if field in self.field_map:
+            offset, decl = self.get_field_declaration(field)
+            return self.instantiate(offset)
+        elif not field in self.anon_map:
+            raise AttributeError(field)
+
+        anon_id = self.anon_map[field]
+
+        if not anon_id in self.declaration_index:
+            raise AttributeError(field)
+
+        offset = self.declaration_index[anon_id]
+
+        return self.instantiate(offset).get_field(field)
+
     def __getattr__(self, attr):
         if 'field_map' not in self.__dict__ and 'anon_map' not in self.__dict__ and attr not in self.__dict__:
             raise AttributeError(attr)
@@ -113,21 +141,8 @@ class Mapping(d_list.List):
         anon_map = self.__dict__['anon_map']
 
         if attr in field_map or attr in anon_map:
-            if attr in field_map:
-                decl_id = field_map[attr]
-            elif attr in anon_map:
-                decl_id = anon_map[attr]
-
-            if not decl_id in self.declaration_index:
-                raise AttributeError(attr)
-            
-            offset = self.declaration_index[decl_id]
-
-            if attr in anon_map:
-                return getattr(self.instantiate(offset), attr)
-            else:
-                return self.instantiate(offset)
-        elif attr in self.__dict__:
+            return self.get_field(attr)
+        if attr in self.__dict__:
             return self.__dict__[attr]
         else:
             raise AttributeError(attr)

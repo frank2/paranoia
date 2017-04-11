@@ -34,9 +34,6 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         dict_merge(kwargs, self.args)
         kwargs['declaration'] = self
 
-        if not self.instance is None:
-            self.instance.invalidated = True
-            
         self.instance = self.base_class(**kwargs)
         return self.instance
 

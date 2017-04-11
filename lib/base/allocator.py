@@ -11,9 +11,50 @@ except ImportError: # python3
 
 from paranoia.base import paranoia_agent
 from paranoia.base import address
-from paranoia.converters import string_address
+from paranoia.converters import align, string_address
 
 __all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation']
+
+def hexdump(address, size, label=None):
+    import sys
+    
+    data = ctypes.string_at(address, size)
+    dump_size = align(size, 16)
+
+    if label is None:
+        sys.stdout.write('[hexdump @ %X]\n' % address)
+    else:
+        sys.stdout.write('[%s @ %X]\n' % (label, address))
+
+    for i in xrange(dump_size):
+        if i % 16 == 0:
+            sys.stdout.write('[%08X] ' % (address+i))
+
+        if i < len(data):
+            sys.stdout.write('%02X ' % ord(data[i]))
+        else:
+            sys.stdout.write('   ')
+
+        if i % 2 == 1:
+            sys.stdout.write('  ')
+
+        if i % 16 == 15:
+            base = i - 15
+
+            for j in range(base, base+16):
+                if j < len(data):
+                    char = data[j]
+                else:
+                    char = ' '
+                    
+                val = ord(char)
+
+                if 0x20 <= val <= 0x7F:
+                    sys.stdout.write('%s' % char)
+                else:
+                    sys.stdout.write('.')
+
+            sys.stdout.write('\n')
 
 class AllocatorError(paranoia_agent.ParanoiaError):
     pass
@@ -30,7 +71,7 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             crt_module = ctypes.cdll.msvcrt
         elif system.startswith('CYGWIN'):
             crt_module = ctypes.cdll.LoadLibrary('msvcrt.dll')
-        elif system == 'Linux' or system.startswith('CYGWIN'):
+        elif system == 'Linux':
             crt_module = ctypes.cdll.LoadLibrary('libc.so.6')
         elif system == 'Darwin':
             crt_module = ctypes.cdll.LoadLibrary('libc.dylib')
@@ -64,12 +105,10 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         if not isinstance(byte_length, (int, long)):
             raise AllocatorError('integer value not given')
 
-        heap_buffer = ctypes.create_string_buffer(byte_length)
-        heap_address = ctypes.addressof(heap_buffer)
+        heap_address = self.crt_malloc(byte_length)
         self.crt_memset(heap_address, 0, byte_length)
         
         allocation = Allocation(address=heap_address
-                                ,buffer=heap_buffer
                                 ,size=byte_length
                                 ,allocator=self)
         
@@ -112,21 +151,19 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
-        new_buffer = ctypes.create_string_buffer(size)
-        new_address = ctypes.addressof(new_buffer)
-        
-        self.crt_memset(new_address, 0, size)
-        self.crt_memmove(new_address, allocation.address, allocation.size)
+        new_address = self.crt_realloc(address, size)
 
         allocation.address = new_address
-        del allocation.buffer
-        allocation.buffer = new_buffer
 
+        if size - allocation.size > 0:
+            delta = size - allocation.size
+            self.crt_memset(new_address+allocation.size, 0, delta)
+            
         allocation.size = size
 
         del self.address_map[address]
         self.address_map[new_address] = allocation
-
+        
         return allocation
 
     def free(self, address):
@@ -134,10 +171,11 @@ class Allocator(paranoia_agent.ParanoiaAgent):
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.address_map[address]
+
+        self.crt_memset(address, 0, allocation.size)
+        self.crt_free(address)
         allocation.address = 0
         allocation.size = 0
-        del allocation.buffer
-        allocation.buffer = None
         
         del self.address_map[address]
 
@@ -145,9 +183,10 @@ class Allocator(paranoia_agent.ParanoiaAgent):
         for address in list(self.address_map.keys()):
             self.free(address)
 
+GLOBAL_ALLOCATOR = Allocator()
+
 class Allocation(paranoia_agent.ParanoiaAgent):
     ADDRESS = None
-    BUFFER = None
     SIZE = None
     ALLOCATOR = None
     
@@ -158,7 +197,6 @@ class Allocation(paranoia_agent.ParanoiaAgent):
             long = int
             
         self.address = kwargs.setdefault('address', self.ADDRESS)
-        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
         self.size = kwargs.setdefault('size', self.SIZE)
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
 
@@ -220,7 +258,7 @@ class Allocation(paranoia_agent.ParanoiaAgent):
         if size > self.size:
             raise AllocationError('size exceeds allocation size')
 
-        return list(map(ord, self.read_string(size)))
+        return map(ord, list(self.read_string(size)))
 
     def write_bytestring(self, string, byte_offset=0):
         self.check_address()

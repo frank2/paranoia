@@ -8,86 +8,97 @@ class SizeHintError(numeric_region.NumericRegionError):
     pass
 
 class SizeHint(numeric_region.NumericRegion):
-    TARGET_DECLARATION = None
-    RESOLVED_DECLARATION = None
-    ARGUMENT = 'bitspan'
+    DECLARATION_OFFSET = None
+    DECLARATION_ID = None
+    FIELD_NAME = None
+    ACTION = None
 
     def __init__(self, **kwargs):
-        self.target_declaration = kwargs.setdefault('target_declaration', self.TARGET_DECLARATION)
-        self.resolved_declaration = kwargs.setdefault('resolved_declaration', self.RESOLVED_DECLARATION)
-        self.argument = kwargs.setdefault('argument', self.ARGUMENT)
-
-        if self.target_declaration is None:
-            raise SizeHintError('target_declaration not set')
-
-        if self.argument is None:
-            raise SizeHintError('argument not set')
-
-        if not isinstance(self.target_declaration, (int, str)):
-            raise SizeHintError('target_declaration not an int, long or string')
-
-        if not self.resolved_declaration is None and not isinstance(self.resolved_declaration, int):
-            raise SizeHintError('resolved_declaration must be a hash of a declaration')
-
-        if not isinstance(self.argument, str):
-            raise SizeHintError('argument not a string')
-
         numeric_region.NumericRegion.__init__(self, **kwargs)
-
-    def set_declaration(self):
-        if not self.resolved_declaration is None:
-            declaration_map = getattr(self.parent_region, 'declaration_map', None)
-
-            if not declaration_map:
-                raise SizeHintError('parent_region has no declaration map')
-
-            if self.resolved_declaration not in declaration_map:
-                raise SizeHintError('no declaration found with hash 0x%x' % self.resolved_declaration)
+        self.init_finished = False
         
-            declaration_map[self.resolved_declaration].set_arg(self.argument, self.get_value())
-            decl_hash = hash(declaration_map[self.resolved_declaration])
-        else:
-            declarations = getattr(self.parent_region, 'declarations', None)
+        declaration_offset = kwargs.setdefault('declaration_offset', self.DECLARATION_OFFSET)
+        field_name = kwargs.setdefault('field_name', self.FIELD_NAME)
+        self.declaration_id = kwargs.setdefault('declaration_id', self.DECLARATION_ID)
+        self.action = kwargs.setdefault('action', self.ACTION)
 
-            if not declarations:
-                raise SizeHintError('parent_region has no declarations')
+        if declaration_offset is None and field_name is None and self.declaration_id is None:
+            raise SizeHintError('size hint must point at a declaration offset, a field name or a declaration ID')
+        elif not field_name is None:
+            self.set_field_name(field_name)
+        elif not declaration_offset is None:
+            self.set_offset(declaration_offset)
 
-            if self.target_declaration >= len(declarations):
-                raise SizeHintError('target declaration out of bounds')
-        
-            declarations[self.target_declaration].set_arg(self.argument, self.get_value())
-            decl_hash = hash(declarations[self.target_declaration])
+        self.init_finished = True
 
-        instance_map = getattr(self.parent_region, 'instance_map', None)
+    def set_id(self, decl_id):
+        self.declaration_id = decl_id
 
-        if not instance_map is None and decl_hash in instance_map:
-            instance_map[decl_hash].invalidated = True
-            del instance_map[decl_hash]
+        if self.init_finished:
+            self.resolve()
+
+    def set_offset(self, offset):
+        self.set_id(id(self.parent_region.declarations[offset]))
+
+    def set_field_name(self, field_name):
+        self.set_id(self.parent_region.field_map[field_name])
 
     def set_value(self, value):
-        numeric_region.NumericRegion.set_value(self, value)
-        
-        self.set_declaration()
+        super(SizeHint, self).set_value(value)
+        self.resolve()
 
-        recalculate = getattr(self.parent_region, 'recalculate', None)
+    def resolve(self):
+        decl = None
 
-        if recalculate:
-            recalculate(self.declaration)
+        for d in self.parent_region.declarations:
+            if id(d) == self.declaration_id:
+                decl = d
+                break
 
-    def resolve(self, resolution=None):
-        if isinstance(self.target_declaration, str):
-            if resolution is None:
-                raise SizeHintError('cannot resolve string without resolution')
+        if decl is None:
+            raise SizeHintError('declaration not found')
 
-            self.resolved_declaration = resolution
-            return
+        value = self.get_value()
 
-        declarations = getattr(self.parent_region, 'declarations', None)
+        if self.action == 'resize' or self.action is None:
+            if decl.instance is None:
+                decl.set_arg('bitspan', value)
+            else:
+                decl.instance.resize(value)
+        elif self.action == 'set_elements':
+            if decl.instance is None:
+                decl.set_arg('elements', value)
+            else:
+                decl.instance.set_elements(value)
+        elif isinstance(self.action, str):
+            if decl.instance is None:
+                decl.set_arg(self.action, value)
+            else:
+                setattr(decl.instance, self.action, value)
+        elif callable(self.action):
+            self.action(self, decl)
+        else:
+            raise SizeHintError('incompatible action')
 
-        if declarations is None:
-            raise SizeHintError('parent_region has no declarations')
+    @staticmethod
+    def find_target(hint_decl, list_obj, declarations):
+        offset_arg = hint_decl.args.get('offset', None)
 
-        if self.target_declaration >= len(declarations):
-            raise SizeHintError('target declaration out of bounds')
-        
-        self.resolved_declaration = hash(declarations[self.target_declaration])
+        if not offset_arg is None:
+            return offset_arg
+
+        field_arg = hint_decl.args.get('field_name', None)
+
+        if field_arg is None:
+            id_arg = hint_decl.args.get('declaration_id', None)
+        else:
+            id_arg = list_obj.field_map[field_arg]
+
+        if not id_arg is None:
+            for i in xrange(len(declarations)):
+                decl = declarations[i]
+                
+                if id(decl) == id_arg:
+                    return i
+
+        raise SizeHintError('could not find declaration')
