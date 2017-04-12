@@ -38,8 +38,10 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         return self.instance
 
     def bitspan(self, **kwargs):
-        if 'bitspan' not in self.args:
-            return self.base_class.static_bitspan(**self.args)
+        dict_merge(kwargs, self.args)
+        
+        if 'bitspan' not in kwargs:
+            return self.base_class.static_bitspan(**kwargs)
 
         return self.args['bitspan']
 

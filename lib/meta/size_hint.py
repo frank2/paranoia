@@ -45,7 +45,9 @@ class SizeHint(numeric_region.NumericRegion):
 
     def set_value(self, value):
         super(SizeHint, self).set_value(value)
-        self.resolve()
+
+        if self.init_finished:
+            self.resolve()
 
     def resolve(self):
         decl = None

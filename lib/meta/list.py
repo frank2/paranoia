@@ -26,9 +26,9 @@ class List(memory_region.MemoryRegion):
 
     def __init__(self, **kwargs):
         self.mapped = False
-        
-        self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
+
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
+        self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
         self.declaration_index = dict()
             
         if self.declarations is None:
@@ -36,7 +36,7 @@ class List(memory_region.MemoryRegion):
 
         # if the declarations come from the class definition, copy the instances
         if self.declarations == self.DECLARATIONS:
-            self.declarations = map(copy.copy, self.DECLARATIONS)
+            self.declarations = map(copy.deepcopy, self.DECLARATIONS)
 
         if not isinstance(self.declarations, list):
             raise ListError('declarations must be a list of Declaration objects')
@@ -67,23 +67,45 @@ class List(memory_region.MemoryRegion):
 
         for decl in self.map_declarations():
             span = decl.bitspan()
+            index = self.declaration_index[id(decl)]
             new_bitcount = align(bitcount, decl.alignment()) + span
             new_bytecount = align(new_bitcount, 8) / 8
 
             if new_bytecount > bytecount:
                 self.write_bytes(bytelist[bytecount:new_bytecount], bytecount)
+                instance = self[index]
+
+                try:
+                    instance.parse_memory() # TODO make this function a class method
+                except NeedMoreDataError:
+                    pass
+
+                while instance.bitspan > span:
+                    bytecount = new_bytecount
+                    new_bitcount = align(span, instance.alignment) + instance.bitspan
+                    new_bytecount = align(new_bitcount, 8) / 8
+                    self.write_bytes(bytelist[bytecount:new_bytecount], bytecount)
+                    span = instance.bitspan
+                    instance = self.instantiate(index, reinstance=True)
+                
                 bytecount = new_bytecount
 
             bitcount = new_bitcount
 
     def parse_memory(self):
+        if self.mapped:
+            return super(List, self).parse_memory()
+        
         bytelist = list()
         bitcount = self.bitshift
         bytecount = 0
 
         for decl in self.map_declarations():
-            span = decl.bitspan()
-            new_bitcount = align(bitcount, decl.alignment()) + span
+            index = self.declaration_index[id(decl)]
+            instance = self[index]
+            instance.parse_memory()
+            span = instance.bitspan()
+            new_bitcount = align(bitcount, instance.alignment) + span
             new_bytecount = align(new_bitcount, 8) / 8
 
             if new_bytecount > bytecount:
@@ -111,12 +133,13 @@ class List(memory_region.MemoryRegion):
             
             if i in hint_targets:
                 self.instantiate(hint_targets[i]).resolve()
-
-            yield decl
+                self.resize(List.declarative_size(self.overlaps, self.declarations))
 
             self.declare_subregion(decl)
             self.declaration_index[id(decl)] = i
-            
+                
+            yield decl
+
         self.mapped = True
 
     def movement_deltas(self, index, init_delta):
@@ -144,6 +167,89 @@ class List(memory_region.MemoryRegion):
 
         return deltas
 
+    def accomodate_subregion(self, decl, new_size):
+        if not isinstance(decl, declaration.Declaration):
+            raise memory_region.MemoryRegionError('decl must be a Declaration object')
+
+        if not self.has_subregion(decl):
+            raise memory_region.MemoryRegionError('subregion not found')
+
+        current_offset = self.subregion_offsets[id(decl)]
+        current_index = self.declaration_index[id(decl)]
+        size_delta = new_size - decl.bitspan()
+
+        if size_delta == 0:
+            return
+
+        if size_delta > 0:
+            old_size = decl.get_arg('bitspan')
+            decl.set_arg('bitspan', new_size)
+            new_size = List.declarative_size(self.overlaps, self.declarations)
+
+            # region must be resized first to accomodate new_size, then other regions
+            # can be moved
+            self.resize(new_size)
+
+            # set it back to the old size and let resize_subregion do its thing
+            decl.set_arg('bitspan', old_size)
+
+            deltas = self.movement_deltas(current_index, size_delta)
+            targets = deltas.keys()
+            targets.sort()
+            targets.reverse()
+            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
+        
+            for offset in targets:
+                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+
+        # resize_subregion will handle the other case, where the targets need to be moved *before*
+        # resize is called on the list object
+
+    def resize_subregion(self, decl, new_size):
+        if not isinstance(decl, declaration.Declaration):
+            raise memory_region.MemoryRegionError('decl must be a Declaration object')
+
+        if not self.has_subregion(decl):
+            raise memory_region.MemoryRegionError('subregion not found')
+
+        current_offset = self.subregion_offsets[id(decl)]
+        current_index = self.declaration_index[id(decl)]
+        size_delta = new_size - decl.bitspan()
+
+        if size_delta == 0:
+            return
+
+        self.accomodate_subregion(decl, new_size)
+        self.remove_subregion(decl)
+            
+        old_size = decl.get_arg('bitspan')
+        decl.set_arg('bitspan', new_size)
+
+        try:
+            self.declare_subregion(decl, current_offset)
+        except Exception as e:
+            decl.set_arg('bitspan', old_size)
+            raise e
+
+        if size_delta < 0:
+            # subregion shrank, move all subregions
+            deltas = self.movement_deltas(current_index, size_delta)
+            targets = deltas.keys()
+            targets.sort()
+
+            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
+        
+            for offset in targets:
+                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+
+            new_list_size = List.declarative_size(self.overlaps, self.declarations)
+
+            # region can now be resized
+            self.resize(new_list_size)
+
+        if not decl.instance is None:
+            decl.instance.bitspan = new_size
+
     def insert_declaration(self, index, decl):
         if self.is_bound():
             raise ListError('cannot alter declarations of bound list after instantiation')
@@ -152,11 +258,11 @@ class List(memory_region.MemoryRegion):
         deltas = self.movement_deltas(index, decl.bitspan())
         self.declarations.insert(index, decl)
 
-        #try:
-        self.resize(List.declarative_size(self.overlaps, self.declarations))
-        #except Exception,e:
-        #    self.declarations.pop(index)
-        #    raise e
+        try:
+            self.resize(List.declarative_size(self.overlaps, self.declarations))
+        except Exception,e:
+            self.declarations.pop(index)
+            raise e
 
         if not deltas is None:
             targets = deltas.keys()

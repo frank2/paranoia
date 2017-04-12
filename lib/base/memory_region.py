@@ -160,6 +160,28 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     def parse_memory(self):
         return self.read_bytestring(self.bytespan())
 
+    def rebase(self, new_base, new_shift):
+        if not isinstance(new_base, address.Address):
+            raise MemoryRegionError('new memory base must be an Address object')
+
+        self.memory_base = new_base
+        self.bitshift = new_shift
+
+        regions = self.subregion_offsets.items()
+        regions.sort(lambda x,y: cmp(x[1], y[1]))
+
+        for region in regions:
+            ident, offset = region
+            decl = self.subregions[ident]
+            new_sub_base = self.bit_offset_to_base(offset, decl.alignment())
+            new_sub_shift = self.bit_offset_to_shift(offset, decl.alignment())
+
+            if not decl.instance is None:
+                decl.instance.rebase(new_sub_base, new_sub_shift)
+            else:
+                decl.set_arg('memory_base', new_sub_base)
+                decl.set_arg('bitshift', new_sub_shift)
+
     def subregion_ranges(self):
         regions = self.subregion_offsets.items()
         regions.sort(lambda x,y: cmp(x[1], y[1]))
@@ -233,22 +255,21 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.subregion_offsets[id(decl)] = bit_offset
 
         if bit_offset+decl.bitspan() > self.shifted_bitspan():
-            try:
-                self.accomodate_subregion(decl, decl.bitspan())
-            except Exception as e:
-                del self.subregions[id(decl)]
-                del self.subregion_offsets[id(decl)]
-                raise e
+            #try:
+            self.accomodate_subregion(decl, decl.bitspan())
+            #except Exception as e:
+            #    del self.subregions[id(decl)]
+            #    del self.subregion_offsets[id(decl)]
+            #    raise e
 
         new_base = self.bit_offset_to_base(bit_offset, decl.alignment())
         new_shift = self.bit_offset_to_shift(bit_offset, decl.alignment())
 
         if not decl.instance is None:
-            decl.instance.memory_base = new_base
-            decl.instance.bitshift = new_shift
+            decl.instance.rebase(new_base, new_shift)
         else:
-            decl.args['memory_base'] = new_base
-            decl.args['bitshift'] = new_shift
+            decl.set_arg('memory_base', new_base)
+            decl.set_arg('bitshift', new_shift)
 
         return decl
 
@@ -354,18 +375,20 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             return map(lambda x: self.subregions[x], results)
 
     def bit_offset_to_base(self, bit_offset, alignment):
-        aligned = align(bit_offset, alignment)
+        aligned = align(self.bitshift + bit_offset, alignment)
         bytecount = int(aligned/8) # python3 makes a float
 
         return self.memory_base.fork(bytecount)
 
     def bit_offset_to_shift(self, bit_offset, alignment):
+        fixed_offset = self.bitshift + bit_offset
+        
         if alignment == MemoryRegion.ALIGN_BIT:
-            return bit_offset % 8
+            return fixed_offset % 8
         elif alignment == MemoryRegion.ALIGN_BYTE:
             return 0
         else:
-            return align(bit_offset, alignment) % 8
+            return align(fixed_offset, alignment) % 8
 
     def bytespan(self):
         aligned = align(self.bitshift+self.bitspan, self.alignment)

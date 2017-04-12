@@ -15,10 +15,10 @@ class WcharError(numeric_region.NumericRegionError):
     pass
 
 class Wchar(word.Word):
-    def get_wchar_value(self):
-        return self.read_bytestring(2).decode('utf-16be')
+    def get_char_value(self):
+        return unichr(self.get_value()).encode('utf-16be').decode('utf-16be')
 
-    def set_wchar_value(self, wchar):
+    def set_char_value(self, wchar):
         # python3 doesn't have a unicode type-- strings are, in fact, unicode.
         # so rejoin israel and palestine by doing the needful to a unicode
         # object
@@ -33,14 +33,7 @@ class Wchar(word.Word):
         if len(wchar) > 1:
             raise WcharError('input string can only be one character long')
 
-        encoded = wchar.encode('utf-16be')
-
-        if isinstance(encoded, str): # python 2
-            encoded = list(map(ord, encoded))
-        else:
-            encoded = list(encoded)
-
-        self.write_bits_from_bytes(encoded)
+        self.set_value(ord(wchar))
 
 class WcharArray(array.Array):
-    BASE_CLASS = Wchar
+    BASE_DECLARATION = Wchar

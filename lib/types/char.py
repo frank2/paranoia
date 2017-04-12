@@ -23,4 +23,4 @@ class Char(byte.Byte):
         self.set_value(ord(char))
 
 class CharArray(array.Array):
-    BASE_CLASS = Char
+    BASE_DECLARATION = Char

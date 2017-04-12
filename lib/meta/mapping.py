@@ -33,7 +33,7 @@ class Mapping(d_list.List):
         fields = decl.args.get('fields', None)
 
         if fields is None and not decl.base_class.FIELDS is None:
-            fields = map(lambda x: [x[0], copy.copy(x[1])], decl.base_class.FIELDS)
+            fields = map(lambda x: [x[0], copy.deepcopy(x[1])], decl.base_class.FIELDS)
 
         # we need to modify the fields, change this
         if isinstance(fields, tuple):
