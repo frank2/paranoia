@@ -99,6 +99,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         data = kwargs.setdefault('data', self.DATA)
         value = kwargs.setdefault('value', self.VALUE)
         parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
+        parser = None
 
         if not data is None and not isinstance(data, str):
             raise MemoryRegionError('data must be a string')
@@ -115,7 +116,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             raise MemoryRegionError('bitspan cannot be None')
 
         if self.bitshift > 8 or self.bitshift < 0:
-            raise MemoryRegionError('bitshift must be within the range of 0-8 noninclusive')
+            raise MemoryRegionError('bitshift must be within the range of 0 <= x < 8')
 
         if not self.parent_region is None and not isinstance(self.parent_region, MemoryRegion):
             raise MemoryRegionError('parent_region must implement MemoryRegion')
@@ -136,29 +137,81 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not self.memory_base is None and not isinstance(self.memory_base, address.Address):
             raise MemoryRegionError('memory_base must be an Address object')
 
-        if self.zero_memory and self.is_allocated() and not self.bitspan == 0:
+        if not parse_memory and self.zero_memory and not self.bitspan == 0:
             self.write_bits([0] * self.bitspan)
 
         if parse_memory:
-            data = self.parse_memory()
-
-        if not data is None:
-            self.parse_data(data)
-
-        if not value is None:
+            parser = self.memory_parser(**kwargs)
+        elif not data is None:
+            parser = self.data_parser(**kwargs)
+        elif not value is None:
             self.set_value(value)
+
+        for parsed in parser:
+            read, want = parsed
+
+            if want == 0:
+                break
+
+            raise MemoryRegionError('unexpected EOF in parser data')
 
         self.static = kwargs.setdefault('static', self.STATIC)
         self.init_finished = True
 
+    def data_parser(self, **kwargs):
+        data = kwargs.setdefault('data', self.DATA)
+
+        if data is None:
+            data = ''
+            
+        parser = self.__class__.parser_generator(**kwargs)
+        last_read = 0
+        bytes_read = 0
+        tape = data
+
+        for parsed in parser:
+            read, want = parsed
+
+            if read > 0:
+                write_data = map(ord, tape[:read])
+                tape = tape[read:]
+                last_read += read
+                
+                self.write_bytes(write_data, bytes_read)
+                bytes_read += len(write_data)
+
+            if want == 0:
+                break
+
+            if len(tape) == 0:
+                tape = yield (last_read, want)
+                last_read = 0
+                
+            parser.send(tape[:want])
+
+        yield (last_read, 0)
+
+    def memory_parser(self, **kwargs):
+        kwargs['data'] = None
+        data_parser = self.data_parser(**kwargs)
+        bytes_read = 0
+
+        for parsed in data_parser:
+            read, want = parsed
+
+            if want == 0:
+                break
+
+            bytelist = self.read_bytes(want, bytes_read)
+            bytes_read += len(bytelist)
+            str_data = ''.join(map(chr, bytelist))
+
+            data_parser.send(str_data)
+
+        yield (bytes_read, 0)
+
     def is_bound(self):
         return self.bind and self.init_finished
-
-    def parse_data(self, data):
-        self.write_bytes(map(ord, list(data)))
-
-    def parse_memory(self):
-        return self.read_bytestring(self.bytespan())
 
     def rebase(self, new_base, new_shift):
         if not isinstance(new_base, address.Address):
@@ -681,6 +734,33 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
 
         paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)
 
+    @classmethod
+    def parser_generator(cls, **kwargs):
+        '''Create a generic parser generator that simply iterates over the bytes
+in the input data until it reaches the size of the aligned bitspan.'''
+        
+        data = kwargs.setdefault('data', cls.DATA)
+
+        if data is None:
+            data = ''
+            
+        bitspan = kwargs.setdefault('bitspan', cls.BITSPAN)
+        bitshift = kwargs.setdefault('bitshift', cls.BITSHIFT)
+        alignment = kwargs.setdefault('alignment', cls.ALIGNMENT)
+        bytespan = align(bitspan+bitshift, 8)/8
+
+        read_data = len(data[:bytespan])
+        total_read = read_data
+        bytespan -= read_data
+        
+        while bytespan > 0:
+            read_data = yield (read_data, bytespan)
+            read_data = len(read_data[:bytespan])
+            total_read += read_data
+            bytespan -= read_data
+
+        yield (read_data, 0)
+    
     @classmethod
     def declare(cls, **kwargs):
         return declaration.Declaration(base_class=cls, args=kwargs)
