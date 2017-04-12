@@ -130,7 +130,8 @@ class List(memory_region.MemoryRegion):
 
         for i in xrange(len(self.declarations)):
             decl = self.declarations[i]
-            
+
+            # TODO instead, resolve hints immediately when we come across them
             if i in hint_targets:
                 self.instantiate(hint_targets[i]).resolve()
                 self.resize(List.declarative_size(self.overlaps, self.declarations))
