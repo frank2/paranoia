@@ -66,6 +66,9 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
         return copied
 
+    def parser(self):
+        return self.get_arg('parser_class')(self)
+
     def __repr__(self):
         return '<Declaration:%s>' % self.base_class.__name__
                       

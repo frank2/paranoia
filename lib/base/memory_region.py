@@ -7,6 +7,7 @@ import sys
 from paranoia.base import allocator
 from paranoia.base import address
 from paranoia.base import paranoia_agent
+from paranoia.base import parser
 from paranoia.base import declaration
 from paranoia.converters import *
 
@@ -38,6 +39,66 @@ def ensure_declaration(obj):
         return obj.declare()
     else:
         raise MemoryRegionError('declaration must be either a Declaration object or a MemoryRegion class')
+
+class MemoryRegionParser(parser.Parser):
+    def __init__(self, decl):
+        parser.Parser.__init__(self, decl)
+        self.bits_consumed = 0
+        
+    def consume(self):
+        decl = self.declaration
+        consumed = super(MemoryRegionParser, self).consume()
+
+        if not decl.instance is None:
+            decl.instance.write_bits(consumed, self.bits_consumed)
+            
+        self.bits_consumed += len(consumed)
+
+        return consumed
+
+    def feed(self, data=None):
+        if not self.state == parser.Parser.STATE_FEED:
+            raise parser.ParserError('parser not ready for feeding')
+
+        if data is None:
+            if len(self.tape):
+                data = self.tape
+            elif self.declaration.get_arg('parse_memory'):
+                data = self.read_bits(self.last_state.want, self.bits_consumed)
+            else:
+                raise ParseError('unexpected end of file')
+
+        self.gen_obj.send(data)
+        self.state = parser.Parser.STATE_CONSUME
+        
+    def generate(self):
+        decl = self.declaration
+        data = decl.get_arg('data')
+        bitshift = decl.get_arg('bitshift')
+        bitspan = decl.bitspan()
+
+        tape = bytelist_to_bitlist(map(ord, data))
+
+        if bitshift > 0:
+            tape = tape[bitshift:]
+
+        yield tape
+
+        consumed = tape[:bitspan]
+        total_read = len(consumed)
+        bitspan -= total_read
+        unconsumed = tape[total_read:]
+
+        while bitspan > 0:
+            yield parser.ParserState(unconsumed, total_read, bitspan)
+            tape = yield
+                
+            consumed = tape[:bitspan]
+            total_read = len(consumed)
+            bitspan -= total_read
+            unconsumed = tape[total_read:]
+
+        yield parser.ParserState(unconsumed, total_read, 0)
     
 class MemoryRegion(paranoia_agent.ParanoiaAgent):
     DECLARATION = None
@@ -48,6 +109,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     PARENT_REGION = None
     ALLOCATOR_CLASS = allocator.Allocator
     ALLOCATOR = allocator.GLOBAL_ALLOCATOR
+    PARSER_CLASS = MemoryRegionParser
     DATA = None
     VALUE = None
     ZERO_MEMORY = False
@@ -72,7 +134,10 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             self.declaration = ensure_declaration(self.declaration)
         else:
             self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
-            self.declaration.instance = self
+            
+        self.declaration.instance = self
+
+        kwargs['declaration'] = self.declaration
 
         if not issubclass(self.declaration.base_class, self.__class__):
             raise MemoryRegionError('declaration base_class mismatch')
@@ -80,6 +145,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
         self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
+        self.parser_class = kwargs.setdefault('parser_class', self.PARSER_CLASS)
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
@@ -140,75 +206,16 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         if not parse_memory and self.zero_memory and not self.bitspan == 0:
             self.write_bits([0] * self.bitspan)
 
-        if parse_memory:
-            parser = self.memory_parser(**kwargs)
-        elif not data is None:
-            parser = self.data_parser(**kwargs)
+        if parse_memory or not data is None:
+            parser = self.declaration.parser()
         elif not value is None:
             self.set_value(value)
 
-        for parsed in parser:
-            read, want = parsed
-
-            if want == 0:
-                break
-
-            raise MemoryRegionError('unexpected EOF in parser data')
+        if not parser is None:
+            parser.run()
 
         self.static = kwargs.setdefault('static', self.STATIC)
         self.init_finished = True
-
-    def data_parser(self, **kwargs):
-        data = kwargs.setdefault('data', self.DATA)
-
-        if data is None:
-            data = ''
-            
-        parser = self.__class__.parser_generator(**kwargs)
-        last_read = 0
-        bytes_read = 0
-        tape = data
-
-        for parsed in parser:
-            read, want = parsed
-
-            if read > 0:
-                write_data = map(ord, tape[:read])
-                tape = tape[read:]
-                last_read += read
-                
-                self.write_bytes(write_data, bytes_read)
-                bytes_read += len(write_data)
-
-            if want == 0:
-                break
-
-            if len(tape) == 0:
-                tape = yield (last_read, want)
-                last_read = 0
-                
-            parser.send(tape[:want])
-
-        yield (last_read, 0)
-
-    def memory_parser(self, **kwargs):
-        kwargs['data'] = None
-        data_parser = self.data_parser(**kwargs)
-        bytes_read = 0
-
-        for parsed in data_parser:
-            read, want = parsed
-
-            if want == 0:
-                break
-
-            bytelist = self.read_bytes(want, bytes_read)
-            bytes_read += len(bytelist)
-            str_data = ''.join(map(chr, bytelist))
-
-            data_parser.send(str_data)
-
-        yield (bytes_read, 0)
 
     def is_bound(self):
         return self.bind and self.init_finished
@@ -308,12 +315,12 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         self.subregion_offsets[id(decl)] = bit_offset
 
         if bit_offset+decl.bitspan() > self.shifted_bitspan():
-            #try:
-            self.accomodate_subregion(decl, decl.bitspan())
-            #except Exception as e:
-            #    del self.subregions[id(decl)]
-            #    del self.subregion_offsets[id(decl)]
-            #    raise e
+            try:
+                self.accomodate_subregion(decl, decl.bitspan())
+            except Exception as e:
+                del self.subregions[id(decl)]
+                del self.subregion_offsets[id(decl)]
+                raise e
 
         new_base = self.bit_offset_to_base(bit_offset, decl.alignment())
         new_shift = self.bit_offset_to_shift(bit_offset, decl.alignment())
@@ -742,24 +749,39 @@ in the input data until it reaches the size of the aligned bitspan.'''
         data = kwargs.setdefault('data', cls.DATA)
 
         if data is None:
-            data = ''
+            data = []
+        else:
+            data = bytelist_to_bitlist(map(ord, data))
+
+        yield data
             
         bitspan = kwargs.setdefault('bitspan', cls.BITSPAN)
         bitshift = kwargs.setdefault('bitshift', cls.BITSHIFT)
         alignment = kwargs.setdefault('alignment', cls.ALIGNMENT)
-        bytespan = align(bitspan+bitshift, 8)/8
 
-        read_data = len(data[:bytespan])
-        total_read = read_data
-        bytespan -= read_data
+        if not bitshift == 0:
+            data = data[bitshift:]
+
+        read_data = data[:bitspan]
+        total_read = len(read_data)
+        bitspan -= total_read
+        data = data[bitspan:]
+
+        yield (data, total_read, bitspan)
+
+        if bitspan <= 0:
+            return
+
+        total_read = 0
         
-        while bytespan > 0:
-            read_data = yield (read_data, bytespan)
-            read_data = len(read_data[:bytespan])
-            total_read += read_data
-            bytespan -= read_data
+        while bitspan > 0:
+            data = yield (data, total_read, bitspan)
+            read_data = data[:bitspan]
+            total_read = len(read_data)
+            bitspan -= total_read
+            data = read_data
 
-        yield (read_data, 0)
+        yield (data, total_read, 0)
     
     @classmethod
     def declare(cls, **kwargs):

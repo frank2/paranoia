@@ -3,7 +3,7 @@
 import copy
 import inspect
 
-from paranoia.base import declaration, memory_region, paranoia_agent
+from paranoia.base import declaration, memory_region, paranoia_agent, parser
 from paranoia.meta.size_hint import SizeHint
 from paranoia.converters import *
 
@@ -20,8 +20,61 @@ def is_size_hint(decl):
 class ListError(paranoia_agent.ParanoiaError):
     pass
 
+class ListParser(memory_region.MemoryRegionParser):
+    def generate(self):
+        decl = self.declaration
+        decl_gen = decl.instance.map_declarations()
+        data = decl.get_arg('data')
+        bitshift = decl.get_arg('bitshift')
+        bitspan = decl.bitspan()
+        bits_read = 0
+        last_bits = 0
+
+        tape = bytelist_to_bitlist(map(ord, data))
+
+        if bitshift > 0:
+            tape = tape[bitshift:]
+
+        yield tape
+
+        for subdecl in decl_gen:
+            align_delta = (align(bitshift + bits_read, subdecl.alignment()) - bitshift) - bits_read
+            tape = tape[align_delta:]
+            bits_read += align_delta
+            last_bits += align_delta
+            
+            subparser = subdecl.parser()
+
+            while not subparser.state == parser.Parser.STATE_DONE:
+                prior_span = subdecl.bitspan()
+                
+                consumed = subparser.consume()
+                tape = subparser.last_state.unconsumed
+                bits_read += subparser.last_state.read
+                last_bits += subparser.last_state.read
+
+                new_span = subdecl.bitspan()
+
+                if not new_span - prior_span == 0 and not decl.instance is None:
+                    # declaration resized in the middle of parsing, resize the list
+                    # to accomodate
+                    decl.instance.resize(List.declarative_size(decl.get_arg('overlaps'), decl.get_arg('declarations')))
+                    
+                if subparser.state == parser.STATE_DONE:
+                    break
+
+                if not len(tape) > 0:
+                    yield parser.ParserState(tape, last_bits, subparser.last_state.want)
+                    tape = yield
+                    last_bits = 0
+                    
+                subparser.feed(tape)
+
+            yield parser.ParserState(tape, bits_read, 0)
+
 class List(memory_region.MemoryRegion):
     SHRINK = True
+    PARSER_CLASS = ListParser
     DECLARATIONS = None
 
     def __init__(self, **kwargs):
@@ -55,91 +108,24 @@ class List(memory_region.MemoryRegion):
                 continue
 
         self.init_finished = True
-
-    def parse_data(self, data):
-        if self.mapped:
-            super(List, self).parse_data(data)
-            return
-            
-        bytelist = map(ord, list(data))
-        bitcount = self.bitshift
-        bytecount = 0
-
-        for decl in self.map_declarations():
-            span = decl.bitspan()
-            index = self.declaration_index[id(decl)]
-            new_bitcount = align(bitcount, decl.alignment()) + span
-            new_bytecount = align(new_bitcount, 8) / 8
-
-            if new_bytecount > bytecount:
-                self.write_bytes(bytelist[bytecount:new_bytecount], bytecount)
-                instance = self[index]
-
-                try:
-                    instance.parse_memory() # TODO make this function a class method
-                except NeedMoreDataError:
-                    pass
-
-                while instance.bitspan > span:
-                    bytecount = new_bytecount
-                    new_bitcount = align(span, instance.alignment) + instance.bitspan
-                    new_bytecount = align(new_bitcount, 8) / 8
-                    self.write_bytes(bytelist[bytecount:new_bytecount], bytecount)
-                    span = instance.bitspan
-                    instance = self.instantiate(index, reinstance=True)
-                
-                bytecount = new_bytecount
-
-            bitcount = new_bitcount
-
-    def parse_memory(self):
-        if self.mapped:
-            return super(List, self).parse_memory()
-        
-        bytelist = list()
-        bitcount = self.bitshift
-        bytecount = 0
-
-        for decl in self.map_declarations():
-            index = self.declaration_index[id(decl)]
-            instance = self[index]
-            instance.parse_memory()
-            span = instance.bitspan()
-            new_bitcount = align(bitcount, instance.alignment) + span
-            new_bytecount = align(new_bitcount, 8) / 8
-
-            if new_bytecount > bytecount:
-                bytelist += self.read_bytes(new_bytecount - bytecount, bytecount)
-                bytecount = new_bytecount
-
-            bitcount = new_bitcount
-
-        return ''.join(map(chr, bytelist))
         
     def map_declarations(self):
         if self.mapped:
             raise ListError('list has already been mapped')
 
         hints = filter(lambda x: is_size_hint(self.declarations[x]), range(len(self.declarations)))
-        hint_targets = dict()
-        
-        for hint_offset in hints:
-            hint_decl = self.declarations[hint_offset]
-            target_decl = SizeHint.find_target(hint_decl, self, self.declarations)
-            hint_targets[target_decl] = hint_offset
 
         for i in xrange(len(self.declarations)):
             decl = self.declarations[i]
-
-            # TODO instead, resolve hints immediately when we come across them
-            if i in hint_targets:
-                self.instantiate(hint_targets[i]).resolve()
-                self.resize(List.declarative_size(self.overlaps, self.declarations))
 
             self.declare_subregion(decl)
             self.declaration_index[id(decl)] = i
                 
             yield decl
+
+            if i in hints:
+                self[i].resolve()
+                self.resize(List.declarative_size(self.overlaps, self.declarations))
 
         self.mapped = True
 
