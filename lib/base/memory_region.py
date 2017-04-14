@@ -6,6 +6,7 @@ import sys
 
 from paranoia.base import allocator
 from paranoia.base import address
+from paranoia.base import block
 from paranoia.base import paranoia_agent
 from paranoia.base import parser
 from paranoia.base import declaration
@@ -20,6 +21,42 @@ __all__ = ['MemoryRegionError', 'sizeof', 'MemoryRegion']
 
 class MemoryRegionError(paranoia_agent.ParanoiaError):
     pass
+
+class NewRegion(paranoia_agent.ParanoiaAgent):
+    ADDRESS = None
+    AUTO_ALLOCATE = True
+    ALLOCATOR = allocator.GLOBAL_ALLOCATOR
+    BLOCK_CLASS = block.Block
+    BYTESPAN = 0
+    BITSPAN = 0
+    ALIGNMENT = 8
+    SHIFT = 0
+    BUFFER = False
+
+    def __init__(self, **kwargs):
+        self.address = kwargs.setdefault('address', self.ADDRESS)
+        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+        self.block_class = kwargs.setdefault('block_class', self.BLOCK_CLASS)
+        self.bytespan = kwargs.setdefault('bytespan', self.BYTESPAN)
+        self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
+        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
+        self.shift = kwargs.setdefault('shift', self.SHIFT)
+        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
+
+        bitspan_check = align(self.shift + self.bitspan, 8) / 8
+
+        if bitspan_check > self.bytespan:
+            self.bytespan = bitspan_check
+
+        if self.address is None and self.auto_allocate:
+            allocation = self.allocator.allocate(self.bytespan)
+            self.address = allocation.address_object()
+
+        self.blocks = list()
+        
+        for i in xrange(self.bytespan):
+            self.blocks.append(self.block_class(address=self.address.fork(i), buffer=True, shift=self.shift))
 
 def sizeof(memory_region):
     if issubclass(memory_region, MemoryRegion):
@@ -742,46 +779,8 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
         paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)
 
     @classmethod
-    def parser_generator(cls, **kwargs):
-        '''Create a generic parser generator that simply iterates over the bytes
-in the input data until it reaches the size of the aligned bitspan.'''
-        
-        data = kwargs.setdefault('data', cls.DATA)
-
-        if data is None:
-            data = []
-        else:
-            data = bytelist_to_bitlist(map(ord, data))
-
-        yield data
-            
-        bitspan = kwargs.setdefault('bitspan', cls.BITSPAN)
-        bitshift = kwargs.setdefault('bitshift', cls.BITSHIFT)
-        alignment = kwargs.setdefault('alignment', cls.ALIGNMENT)
-
-        if not bitshift == 0:
-            data = data[bitshift:]
-
-        read_data = data[:bitspan]
-        total_read = len(read_data)
-        bitspan -= total_read
-        data = data[bitspan:]
-
-        yield (data, total_read, bitspan)
-
-        if bitspan <= 0:
-            return
-
-        total_read = 0
-        
-        while bitspan > 0:
-            data = yield (data, total_read, bitspan)
-            read_data = data[:bitspan]
-            total_read = len(read_data)
-            bitspan -= total_read
-            data = read_data
-
-        yield (data, total_read, 0)
+    def static_value(cls, **kwargs):
+        raise MemoryRegionError('MemoryRegion does not implement static_value')
     
     @classmethod
     def declare(cls, **kwargs):

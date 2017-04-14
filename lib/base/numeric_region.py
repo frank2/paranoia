@@ -33,6 +33,13 @@ class NumericRegion(memory_region.MemoryRegion):
 
     def get_value(self):
         bitlist = self.read_bits_from_bytes(self.bitspan)
+
+        # static_value expects the data argument to be byte-bound data, so turn the
+        # bitlist into a byte-bound string
+        bitlist = [0] * self.bitshift + bitlist
+        new_length = align(len(bitlist), 8)
+        curr_length = len(bitlist)
+        bitlist = bitlist + [0] * (new_length - curr_length)
         value = 0
 
         if self.alignment == self.ALIGN_BYTE:
