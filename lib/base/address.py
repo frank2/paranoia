@@ -44,7 +44,7 @@ class Address(paranoia_agent.ParanoiaAgent):
     def set_offset(self, value):
         self.offset = value
 
-        if self.allocation:
+        if not self.allocation is None:
             self.allocation.check_id_range(int(self))
 
     def fork(self, offset):
@@ -102,3 +102,6 @@ class Address(paranoia_agent.ParanoiaAgent):
 
     def __repr__(self):
         return '<Address:%X>' % (int(self))
+
+    def __hash__(self):
+        return hash(int(self))

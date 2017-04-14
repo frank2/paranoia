@@ -22,13 +22,71 @@ class AllocatorError(paranoia_agent.ParanoiaError):
 class AllocationError(paranoia_agent.ParanoiaError):
     pass
 
+allocators = set()
+
 class Allocator(paranoia_agent.ParanoiaAgent):
+    def __init__(self, **kwargs):
+        global allocators
+
+        self.allocations = dict()
+
+        allocators.insert(self)
+
+    def allocate(self, length):
+        raise AllocatorError('allocate not implemented')
+
+    def reallocate(self, address, length):
+        raise AllocatorError('reallocate not implemented')
+
+    def free(self, address):
+        if not address in self.allocations:
+            raise AllocatorError('no such address %x' % address)
+
+        self.allocations[address].invalidate()
+        del self.allocations[address]
+
+    def find(self, address):
+        keys = filter(lambda x: x <= address < x+self.allocations[x].size
+                      ,self.allocations.keys())
+
+        if not len(keys):
+            return None
+
+        return self.allocations[address]
+
+    def __del__(self):
+        global allocators
+
+        allocators.remove(self)
+
+    @staticmethod
+    def find_all(address):
+        global allocators
+
+        for allocator in allocators:
+            allocation = allocator.find(address)
+
+            if not allocation is None:
+                return allocation
+
+class MemoryAllocator(Allocator):
+    def allocate(self, address):
+        current = self.find(address)
+
+        if not current is None:
+            return current
+
+        self.allocations[address] = Allocation(id=address, size=0, allocator=self)
+
+        return self.allocations[address]
+        
+
+class HeapAllocator(paranoia_agent.ParanoiaAgent):
     ZERO_MEMORY = True
     
     def __init__(self, **kwargs):
         self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
-            
-        self.address_map = dict()
+        self.allocations = dict()
 
     def allocate(self, byte_length):
         long = getattr(__builtin__, 'long', None)
