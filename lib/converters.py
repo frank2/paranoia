@@ -3,7 +3,12 @@
 import ctypes
 
 __all__ = ['aligned', 'alignment_delta', 'align', 'bitlist_to_bytelist', 'bytelist_to_bitlist'
-           ,'bitlist_to_numeric', 'numeric_to_bitlist', 'dict_merge', 'string_address']
+           ,'bitlist_to_numeric', 'numeric_to_bitlist', 'dict_merge', 'string_address', 'string_offset']
+    
+# /!\ WARNING INCOMING HACK /!\
+key = 'ADNU'
+string_offset = ctypes.string_at(id(key), 256).index(key)
+# /!\ WARNING INCOMING HACK /!\
 
 def aligned(base, alignment):
     return base % alignment == 0
@@ -66,9 +71,6 @@ def dict_merge(dict_one, dict_two):
         dict_one[key] = dict_two[key]
 
 def string_address(string):
-    # /!\ WARNING INCOMING HACK /!\
-    key = 'ADNU'
-    offset = ctypes.string_at(id(key), 256).index(key)
-    # /!\ WARNING INCOMING HACK /!\
+    global string_offset
     
-    return id(string)+offset
+    return id(string)+string_offset

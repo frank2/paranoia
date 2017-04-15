@@ -6,7 +6,6 @@ import sys
 
 from paranoia.base import allocator
 from paranoia.base import address
-from paranoia.base import block
 from paranoia.base import paranoia_agent
 from paranoia.base import parser
 from paranoia.base import declaration
@@ -25,8 +24,8 @@ class MemoryRegionError(paranoia_agent.ParanoiaError):
 class NewRegion(paranoia_agent.ParanoiaAgent):
     ADDRESS = None
     AUTO_ALLOCATE = True
-    ALLOCATOR = allocator.GLOBAL_ALLOCATOR
-    BLOCK_CLASS = block.Block
+    ALLOCATOR = allocator.heap
+    BLOCK_CLASS = allocator.Block
     BYTESPAN = 0
     BITSPAN = 0
     ALIGNMENT = 8
@@ -145,7 +144,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
     ALLOCATION = None
     PARENT_REGION = None
     ALLOCATOR_CLASS = allocator.Allocator
-    ALLOCATOR = allocator.GLOBAL_ALLOCATOR
+    ALLOCATOR = allocator.heap
     PARSER_CLASS = MemoryRegionParser
     DATA = None
     VALUE = None
