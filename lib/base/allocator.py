@@ -175,19 +175,6 @@ class Address(ParanoiaAgent):
         self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
         self.offset = kwargs.setdefault('offset', self.OFFSET)
 
-        if self.allocation is None:
-            # if there's no allocation, we assume this address is just an abstract memory pointer. find its
-            # allocation in memory and, if it doesn't exist, create it
-            global memory
-
-            self.allocation = Allocator.find_all(self.offset)
-
-            if not self.allocation is None:
-                self.offset = self.offset - self.allocation.id
-            else:
-                self.allocation = memory.allocate(self.offset)
-                self.offset = 0
-
         if not isinstance(self.offset, (int, long)):
             raise AddressError('offset must be an int or a long')
 
@@ -200,7 +187,20 @@ class Address(ParanoiaAgent):
         return self.allocation.id + self.offset
 
     def set_offset(self, value):
-        self.offset = value
+        if self.allocation is None:
+            # if there's no allocation, we assume this address is just an abstract memory pointer. find its
+            # allocation in memory and, if it doesn't exist, create it
+            global memory
+
+            self.allocation = Allocator.find_all(self.offset)
+
+            if not self.allocation is None:
+                self.offset = self.offset - self.allocation.id
+            else:
+                self.allocation = memory.allocate(self.offset)
+                self.offset = 0
+        else:
+            self.offset = value
 
     def fork(self, offset):
         return Address(offset=self.offset+offset, allocation=self.allocation)
@@ -244,6 +244,7 @@ class Address(ParanoiaAgent):
 class BlockError(ParanoiaError):
     pass
 
+# TODO BlockChain class... 'cause why not, bitcoin is hilarious
 class Block(ParanoiaAgent):
     ADDRESS = None
     VALUE = None
