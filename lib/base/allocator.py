@@ -205,6 +205,12 @@ class Address(ParanoiaAgent):
     def fork(self, offset):
         return Address(offset=self.offset+offset, allocation=self.allocation)
 
+    def get_block(self, offset=0, force=False):
+        return self.allocation.get_block(int(self)+offset, force)
+
+    def set_block(self, block, offset=0, force=False):
+        return self.allocation.set_block(int(self)+offset, block, force)
+
     def read_byte(self, offset=0):
         return self.allocation.read_byte(int(self)+offset)
 
@@ -220,6 +226,9 @@ class Address(ParanoiaAgent):
     def read_bytes(self, offset=0, size=None, force=False, direct=False):
         return self.allocation.read_bytes(int(self)+offset, size, force, direct)
 
+    def read_bits(self, bit_offset=0, size=None, force=False, direct=False):
+        return self.allocation.read_bits(int(self)+bit_offset/8, bit_offset % 8, size, force, direct)
+
     def write_bytestring(self, string, offset=0, force=False, direct=False):
         return self.allocation.write_bytestring(int(self)+offset, string, force, direct)
 
@@ -228,6 +237,9 @@ class Address(ParanoiaAgent):
 
     def write_bytes(self, byte_list, offset=0, force=False, direct=False):
         return self.allocation.write_bytes(int(self)+offset, byte_list, force, direct)
+
+    def write_bits(self, bit_list, bit_offset=0, force=False, direct=False):
+        return self.allocation.write_bits(int(self)+bit_offset/8, bit_list, bit_offset % 8, force, direct)
 
     def flush(self, offset=0, size=None):
         self.allocation.flush(int(self)+offset, size)
@@ -244,7 +256,6 @@ class Address(ParanoiaAgent):
 class BlockError(ParanoiaError):
     pass
 
-# TODO BlockChain class... 'cause why not, bitcoin is hilarious
 class Block(ParanoiaAgent):
     ADDRESS = None
     VALUE = None
@@ -296,13 +307,16 @@ class Block(ParanoiaAgent):
         value = self.get_value(force)
 
         if bit_value == 1:
-            value |= bit_value << (7 - bit_offset)
+            value |= 1 << (7 - bit_offset)
         else:
-            value &= (bit_value << (7 - bit_offset)) ^ 0xFF
+            value &= ~(1 << (7 - bit_offset))
 
         self.set_value(value, force)
 
     def flush(self):
+        if self.value is None:
+            return
+        
         self.address.write_byte(self.value)
 
     def __getitem__(self, index):
@@ -335,6 +349,93 @@ class Block(ParanoiaAgent):
 
     def __repr__(self):
         return '<Block:0x%X/%d>' % (int(self.address), self.get_value())
+
+class BlockLink(Block):
+    SHIFT = 0
+
+    def __init__(self, **kwargs):
+        super(BlockLink, self).__init__(**kwargs)
+        
+        self.shift = kwargs.setdefault('shift', self.SHIFT)
+
+    def get_value(self, force=False):
+        if self.shift == 0:
+            self.value = self.address.get_block().get_value(force)
+            return self.value
+
+        if self.value is None or force or not self.buffer:
+            bitlist = list()
+            lb = self.address.get_block(0)
+            rb = self.address.get_block(1)
+            self.value = 0
+
+            for i in xrange(8):
+                offset = self.shift + i
+
+                if offset >= 8:
+                    cb = rb
+                else:
+                    cb = lb
+
+                self.value <<= 1
+                self.value |= cb.get_bit(offset % 8, force)
+
+        return self.value
+
+    def set_value(self, value, force=False):
+        if not 0 <= value < 256:
+            raise BlockError('value must be 0 <= value < 256')
+        
+        self.value = value
+
+        if self.shift == 0:
+            self.address.get_block().set_value(value, force)
+        elif force or not self.buffer:
+            self.flush()
+
+    def flush(self):
+        if self.value is None:
+            return
+
+        if self.shift == 0:
+            self.address.get_block().flush()
+            return
+
+        lb = self.address.get_block(0)
+        rb = self.address.get_block(1)
+        value = self.value
+
+        for i in reversed(xrange(8)):
+            offset = self.shift + i
+
+            if offset >= 8:
+                cb = rb
+            else:
+                cb = lb
+
+            cb[offset % 8] = value & 1
+            value >>= 1
+
+        lb.flush()
+        rb.flush()
+
+        self.value = None
+
+class BlockChain(ParanoiaAgent):
+    ADDRESS = None
+    SHIFT = 0
+    CHAIN_LENGTH = 0
+
+    def __init__(self, **kwargs):
+        self.address = kwargs.setdefault('address', self.ADDRESS)
+
+        if self.address is None:
+            raise BlockError('address cannot be None')
+
+        if not isinstance(self.address, Address):
+            raise BlockError('address must be an Address object')
+
+        self.shift = kwargs.setdefault('shift', self.SHIFT)
 
 class Allocation(ParanoiaAgent):
     ID = None
@@ -392,7 +493,7 @@ class Allocation(ParanoiaAgent):
         if not self.in_range(other_id):
             raise AllocationError('id out of range')
 
-    def address_object(self, offset=0):
+    def address(self, offset=0):
         return Address(offset=offset, allocation=self)
 
     def reallocate(self, size):
@@ -404,18 +505,21 @@ class Allocation(ParanoiaAgent):
             return
 
         self.allocator.free(self.id)
+        self.id = 0
 
     def get_block(self, id_val, force=False):
+        self.check_id()
         self.check_id_range(id_val)
         
         delta = id_val - self.id
 
         if not delta in self.blocks:
-            self.set_block(id_val, Block(address=self.address_object(delta), buffer=self.buffer), force)
+            self.set_block(id_val, Block(address=self.address(delta), buffer=self.buffer), force)
 
         return self.blocks[delta]
 
     def set_block(self, id_val, block, force=False):
+        self.check_id()
         self.check_id_range(id_val)
 
         if not isinstance(block, Block):
@@ -427,16 +531,14 @@ class Allocation(ParanoiaAgent):
             self.blocks[delta].set_value(block.get_value(force))
         else:
             block.buffer = self.buffer
-            block.address = self.address_object(delta)
+            block.address = self.address(delta)
             self.blocks[delta] = block
 
         if not block.value is None and (self.buffer or force):
             self.flush(id_val, 1)
 
     def read_byte(self, id_val):
-        if id_val is None:
-            id_val = self.id
-            
+        self.check_id()
         self.check_id_range(id_val)
 
         byte = ctypes.string_at(id_val, 1)
@@ -444,6 +546,7 @@ class Allocation(ParanoiaAgent):
         return ord(byte)
 
     def write_byte(self, id_val, byte_val):
+        self.check_id()
         self.check_id_range(id_val)
 
         if not 0 <= byte_val < 256:
@@ -454,12 +557,16 @@ class Allocation(ParanoiaAgent):
         memmove(id_val, str_addr, 1)
 
     def read_bytestring(self, id_val, size=None, force=False, direct=False):
+        self.check_id()
         self.check_id_range(id_val)
 
         offset = id_val - self.id
         
         if size is None:
             size = self.size - offset
+
+        if size < 0:
+            raise AllocationError('size is negative')
 
         if size+offset > self.size:
             raise AllocationError('size exceeds allocation size')
@@ -493,8 +600,22 @@ class Allocation(ParanoiaAgent):
             return map(ord, bytelist)
 
         return bytelist
+
+    def read_bits(self, id_val, bit_offset=0, size=None, force=False, direct=False):
+        if size is None:
+            size = self.size * 8
+            
+        bytelist = self.read_bytes(id_val, align(bit_offset+size, 8), force, direct)
+        bitlist = list()
+
+        for byte in bytelist:
+            for i in reversed(xrange(8)):
+                bitlist.append((byte >> i) & 1)
+
+        return bitlist[bit_offset:bit_offset+size]
                                        
     def write_bytestring(self, id_val, string, force=False, direct=False):
+        self.check_id()
         self.check_id_range(id_val)
 
         offset = id_val - self.id
@@ -503,14 +624,20 @@ class Allocation(ParanoiaAgent):
             raise AllocationError('write exceeds allocation size')
         
         if not isinstance(string, (bytes, bytearray)):
-            raise AllocationError('string or byte array value not given')
+            raise AllocationError('byte array not given')
 
-        string_buffer = ctypes.create_string_buffer(string)
+        long = getattr(__builtin__, 'long', None)
+
+        if not long is None: # python 2
+            string_buffer = ctypes.create_string_buffer(str(string))
+        else:
+            string_buffer = ctypes.create_string_buffer(string)
+            
         string_address = ctypes.addressof(string_buffer)
         memmove(id_val, string_address, len(string))
 
         if self.buffer and not direct:
-            affected_blocks = filter(lambda x: offset <= x < size+offset, self.blocks.keys())
+            affected_blocks = filter(lambda x: offset <= x < len(string)+offset, self.blocks.keys())
             
             for block_id in affected_blocks:
                 block = self.blocks[block_id]
@@ -521,6 +648,39 @@ class Allocation(ParanoiaAgent):
 
     def write_bytes(self, id_val, byte_list, force=False, direct=False):
         return self.write_bytestring(id_val, bytearray(byte_list), force, direct)
+
+    def write_bits(self, id_val, bit_list, bit_offset=0, force=False, direct=False):
+        shifted_length = bit_offset + len(bit_list)
+        padding_front = list()
+        front_block = self.get_block(id_val)
+
+        for i in xrange(bit_offset):
+            padding_front.append(front_block.get_bit(i, force))
+            
+        padding_back = list()
+        back_addr = id_val + align(shifted_length, 8)/8 - 1
+        back_block = self.get_block(back_addr)
+        active_bits = shifted_length % 8
+        back_size = 8 * int(not active_bits == 0) - active_bits
+
+        for i in xrange(back_size):
+            padding_back.append(back_block.get_bit(i + active_bits, force))
+
+        print hex(back_addr), padding_back, back_block.get_value()
+
+        bit_list = padding_front + bit_list + padding_back
+        bytelist = list()
+
+        for i in xrange(len(bit_list)/8):
+            value = 0
+
+            for j in xrange(8):
+                value <<= 1
+                value |= bit_list[i*8+j]
+
+            bytelist.append(value)
+
+        self.write_bytes(id_val, bytelist, force, direct)
 
     def flush(self, id_val=None, size=None):
         if not self.buffer:
@@ -559,7 +719,7 @@ class Allocation(ParanoiaAgent):
                 block_range.append(i)
 
                 block_start, block_end = block_range
-                byte_array = bytes(map(Block.get_value, map(lambda x: self.blocks[x], range(*block_range))))
+                byte_array = bytes(map(lambda x: self.blocks[x].value, range(*block_range)))
                 string_buffer = ctypes.create_string_buffer(byte_array)
                 string_address = ctypes.addressof(string_buffer)
 
