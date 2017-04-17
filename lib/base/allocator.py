@@ -203,6 +203,8 @@ class Address(ParanoiaAgent):
             self.offset = value
 
     def fork(self, offset):
+        self.allocation.check_id_range(int(self)+offset)
+        
         return Address(offset=self.offset+offset, allocation=self.allocation)
 
     def get_block(self, offset=0, force=False):
@@ -305,11 +307,12 @@ class Block(ParanoiaAgent):
             raise BlockError('bit must be between 0 and 1')
 
         value = self.get_value(force)
+        mask = 1 << (7 - bit_offset)
 
         if bit_value == 1:
-            value |= 1 << (7 - bit_offset)
+            value |= mask
         else:
-            value &= ~(1 << (7 - bit_offset))
+            value &= ~mask
 
         self.set_value(value, force)
 
@@ -424,6 +427,7 @@ class BlockLink(Block):
 class BlockChain(ParanoiaAgent):
     ADDRESS = None
     SHIFT = 0
+    BUFFER = True
     CHAIN_LENGTH = 0
 
     def __init__(self, **kwargs):
@@ -436,6 +440,60 @@ class BlockChain(ParanoiaAgent):
             raise BlockError('address must be an Address object')
 
         self.shift = kwargs.setdefault('shift', self.SHIFT)
+        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
+        self.chain = list()
+
+        chain_length = kwargs.setdefault('chain_length', self.CHAIN_LENGTH)
+        self.set_length(chain_length)
+
+    def set_length(self, chain_length):
+        self.chain = [BlockLink(address=self.address.fork(x)
+                                ,shift=self.shift
+                                ,buffer=self.buffer) for x in xrange(chain_length)]
+
+    def set_shift(self, shift):
+        for link in self.chain:
+            link.flush()
+            link.shift = shift
+
+        self.shift = shift
+
+    def bit_iterator(self):
+        for i in xrange(len(self.chain)*8):
+            yield self[i/8][i%8]
+
+    def byte_iterator(self):
+        for link in chain:
+            yield int(link)
+
+    def link_iterator(self):
+        for link in self.chain:
+            yield link
+
+    def block_iterator(self):
+        block_count = align(self.shift + len(self.chain) * 8, 8)/8
+
+        for i in block_count:
+            yield self.address.get_block(i)
+
+    def flush(self):
+        for block in self.link_iterator():
+            block.flush()
+
+    def __getitem__(self, index):
+        if index < 0:
+            index += len(self.chain)
+
+        if index < 0 or index >= len(self.chain):
+            raise IndexError(index)
+
+        return self.chain[index]
+
+    def __setitem__(self, index, block_or_int):
+        if not isinstance(block, (Block, BlockLink, int)):
+            raise BlockError('block must be a BlockLink, Block or int')
+
+        self.chain[index].set_value(int(block_or_int))
 
 class Allocation(ParanoiaAgent):
     ID = None
@@ -603,7 +661,7 @@ class Allocation(ParanoiaAgent):
 
     def read_bits(self, id_val, bit_offset=0, size=None, force=False, direct=False):
         if size is None:
-            size = self.size * 8
+            size = self.size * 8 - bit_offset
             
         bytelist = self.read_bytes(id_val, align(bit_offset+size, 8), force, direct)
         bitlist = list()
