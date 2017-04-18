@@ -2,6 +2,8 @@
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
+__all__ = ['AddressError', 'Address']
+
 class AddressError(ParanoiaError):
     pass
 
@@ -36,17 +38,20 @@ class Address(ParanoiaAgent):
         return self.allocation.id + self.offset
 
     def set_offset(self, value):
+        from paranoia.base.allocator import memory, Allocator
+        
         if self.allocation is None:
             # if there's no allocation, we assume this address is just an abstract memory pointer. find its
             # allocation in memory and, if it doesn't exist, create it
-            global memory
 
             self.allocation = Allocator.find_all(self.offset)
 
             if not self.allocation is None:
                 self.offset = self.offset - self.allocation.id
             else:
+                # we're sort of reverse-allocating an address, so this is gonna look weird
                 self.allocation = memory.allocate(self.offset)
+                self.allocation.addresses[0] = self
                 self.offset = 0
         else:
             self.offset = value
@@ -55,6 +60,9 @@ class Address(ParanoiaAgent):
         self.allocation.check_id_range(int(self)+offset)
         
         return self.allocation.address(self.offset+offset)
+
+    def copy(self):
+        return self.__class__(offset=self.offset, allocation=self.allocation)
 
     def get_block(self, offset=0, force=False):
         return self.allocation.get_block(int(self)+offset, force)

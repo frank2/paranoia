@@ -11,6 +11,8 @@ except ImportError: # python3
     import builtins as __builtin__
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.address import Address
+from paranoia.base.block import Block
 from paranoia.converters import align, string_address
 
 allocators = set()
@@ -36,7 +38,6 @@ elif system == 'Darwin':
 else:
     raise MemoryError('unsupported platform %s' % system)
 
-# HERE'S THE PART WHERE I CLEAN UP AFTER CTYPES' MESS
 malloc = crt_module.malloc
 malloc.restype = ctypes.c_void_p
 malloc.argtypes = (ctypes.c_size_t,)
@@ -48,7 +49,6 @@ realloc.argtypes = (ctypes.c_void_p, ctypes.c_size_t)
 free = crt_module.free
 free.argtypes = (ctypes.c_void_p,)
 
-# HERE'S THE PART WHERE CTYPES MAYBE KINDA HELPS
 memset = ctypes.memset
 memmove = ctypes.memmove
 
@@ -159,246 +159,6 @@ class AllocatorError(ParanoiaError):
 class AllocationError(ParanoiaError):
     pass
 
-class BlockError(ParanoiaError):
-    pass
-
-class Block(ParanoiaAgent):
-    ADDRESS = None
-    VALUE = None
-    BUFFER = True
-    
-    def __init__(self, **kwargs):
-        self.address = kwargs.setdefault('address', self.ADDRESS)
-
-        if self.address is None:
-            raise BlockError('address cannot be None')
-
-        if not isinstance(self.address, Address):
-            raise BlockError('address must be an Address instance')
-
-        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-        self.value = kwargs.setdefault('value', self.VALUE)
-
-        if not self.value is None:
-            self.set_value(value)
-
-    def get_value(self, force=False):
-        if self.value is None or force or not self.buffer:
-            self.value = self.address.read_byte()
-            
-        return self.value
-
-    def set_value(self, value, force=False):
-        if not 0 <= value < 256:
-            raise BlockError('value must be 0 <= value < 256')
-        
-        self.value = value
-
-        if force or not self.buffer:
-            self.flush()
-
-    def get_bit(self, bit_offset, force=False):
-        if not 0 <= bit_offset < 8:
-            raise BlockError('bit offset must be 0 <= offset < 8')
-
-        return (self.get_value(force) >> (7 - bit_offset)) & 1
-
-    def set_bit(self, bit_offset, bit_value, force=False):
-        if not 0 <= bit_offset < 8:
-            raise BlockError('bit offset must be 0 <= offset < 8')
-
-        if not 0 <= bit_value <= 1:
-            raise BlockError('bit must be between 0 and 1')
-
-        value = self.get_value(force)
-        mask = 1 << (7 - bit_offset)
-
-        if bit_value == 1:
-            value |= mask
-        else:
-            value &= ~mask
-
-        self.set_value(value, force)
-
-    def flush(self):
-        if self.value is None:
-            return
-        
-        self.address.write_byte(self.value)
-
-    def __getitem__(self, index):
-        if index < 0:
-            index += 8
-            
-        if not 0 <= index < 8:
-            raise IndexError(index)
-
-        return self.get_bit(index)
-
-    def __setitem__(self, index, value):
-        if index < 0:
-            index += 8
-            
-        if not 0 <= index < 8:
-            raise IndexError(index)
-
-        if not 0 <= value <= 1:
-            raise ValueError(value)
-
-        self.set_bit(index, value)
-
-    def __iter__(self):
-        for i in xrange(8):
-            yield self[i]
-
-    def __int__(self):
-        return self.get_value()
-
-    def __repr__(self):
-        return '<Block:0x%X/%d>' % (int(self.address), self.get_value())
-
-class BlockLink(Block):
-    SHIFT = 0
-
-    def __init__(self, **kwargs):
-        super(BlockLink, self).__init__(**kwargs)
-        
-        self.shift = kwargs.setdefault('shift', self.SHIFT)
-
-    def get_value(self, force=False):
-        if self.shift == 0:
-            self.value = self.address.get_block().get_value(force)
-            return self.value
-
-        if self.value is None or force or not self.buffer:
-            bitlist = list()
-            lb = self.address.get_block(0)
-            rb = self.address.get_block(1)
-            self.value = 0
-
-            for i in xrange(8):
-                offset = self.shift + i
-
-                if offset >= 8:
-                    cb = rb
-                else:
-                    cb = lb
-
-                self.value <<= 1
-                self.value |= cb.get_bit(offset % 8, force)
-
-        return self.value
-
-    def set_value(self, value, force=False):
-        if not 0 <= value < 256:
-            raise BlockError('value must be 0 <= value < 256')
-        
-        self.value = value
-
-        if self.shift == 0:
-            self.address.get_block().set_value(value, force)
-        elif force or not self.buffer:
-            self.flush()
-
-    def flush(self):
-        if self.value is None:
-            return
-
-        if self.shift == 0:
-            self.address.get_block().flush()
-            return
-
-        lb = self.address.get_block(0)
-        rb = self.address.get_block(1)
-        value = self.value
-
-        for i in reversed(xrange(8)):
-            offset = self.shift + i
-
-            if offset >= 8:
-                cb = rb
-            else:
-                cb = lb
-
-            cb[offset % 8] = value & 1
-            value >>= 1
-
-        lb.flush()
-        rb.flush()
-
-        self.value = None
-
-class BlockChain(ParanoiaAgent):
-    ADDRESS = None
-    SHIFT = 0
-    BUFFER = True
-    CHAIN_LENGTH = 0
-
-    def __init__(self, **kwargs):
-        self.address = kwargs.setdefault('address', self.ADDRESS)
-
-        if self.address is None:
-            raise BlockError('address cannot be None')
-
-        if not isinstance(self.address, Address):
-            raise BlockError('address must be an Address object')
-
-        self.shift = kwargs.setdefault('shift', self.SHIFT)
-        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-        self.chain = list()
-
-        chain_length = kwargs.setdefault('chain_length', self.CHAIN_LENGTH)
-        self.set_length(chain_length)
-
-    def set_length(self, chain_length):
-        self.chain = [BlockLink(address=self.address.fork(x)
-                                ,shift=self.shift
-                                ,buffer=self.buffer) for x in xrange(chain_length)]
-
-    def set_shift(self, shift):
-        for link in self.chain:
-            link.flush()
-            link.shift = shift
-
-        self.shift = shift
-
-    def bit_iterator(self):
-        for i in xrange(len(self.chain)*8):
-            yield self[i/8][i%8]
-
-    def byte_iterator(self):
-        for link in chain:
-            yield int(link)
-
-    def link_iterator(self):
-        for link in self.chain:
-            yield link
-
-    def block_iterator(self):
-        block_count = align(self.shift + len(self.chain) * 8, 8)/8
-
-        for i in block_count:
-            yield self.address.get_block(i)
-
-    def flush(self):
-        for block in self.link_iterator():
-            block.flush()
-
-    def __getitem__(self, index):
-        if index < 0:
-            index += len(self.chain)
-
-        if index < 0 or index >= len(self.chain):
-            raise IndexError(index)
-
-        return self.chain[index]
-
-    def __setitem__(self, index, block_or_int):
-        if not isinstance(block, (Block, BlockLink, int)):
-            raise BlockError('block must be a BlockLink, Block or int')
-
-        self.chain[index].set_value(int(block_or_int))
-
 class Allocation(ParanoiaAgent):
     ID = None
     SIZE = None
@@ -430,6 +190,7 @@ class Allocation(ParanoiaAgent):
         if not isinstance(self.allocator, Allocator):
             raise AllocationError('allocator must be an Allocator instance')
 
+        self.addresses = dict()
         self.blocks = dict()
 
     def set_buffering(self, buffering):
@@ -456,7 +217,10 @@ class Allocation(ParanoiaAgent):
             raise AllocationError('id out of range')
 
     def address(self, offset=0):
-        return Address(offset=offset, allocation=self)
+        if not offset in self.addresses:
+            self.addresses[offset] = Address(offset=offset, allocation=self)
+            
+        return self.addresses[offset]
 
     def reallocate(self, size):
         self.check_id()
@@ -693,9 +457,8 @@ class Allocation(ParanoiaAgent):
                 block_range = list()
 
     def invalidate(self):
-        for block_index in self.blocks:
-            block = self.blocks[block_index]
-            block.address.allocation = None
+        for address_index in self.addresses:
+            self.addresses[address_index].allocation = None
 
     def __getitem__(self, index):
         if index < 0:
@@ -830,7 +593,6 @@ class MemoryAllocator(Allocator):
             raise AllocatorError('address was not allocated by allocator')
 
         end_address = address+size
-
         allocation = self.allocations[address]
         allocation.size = size
 
@@ -843,28 +605,48 @@ class MemoryAllocator(Allocator):
             consumed_size = consumed_alloc.size
             consumed_end = consumed_addr + consumed_size
             consumed_offset_end = consumed_offset + consumed_size
+            consumed_addresses = filter(lambda x: x+consumed_offset < size, consumed_alloc.addresses.keys())
+            
+            # shift and save the overlapped address objects
+            for address_offset in consumed_addresses:
+                address_obj = consumed_alloc.addresses[address_offset]
+                address_obj.allocation = allocation
+                address_obj.offset += consumed_offset
+                allocation.addresses[consumed_offset+address_offset] = address_obj
+                del consumed_alloc.addresses[address_offset]
+                
             consumed_blocks = filter(lambda x: x+consumed_offset < size, consumed_alloc.blocks.keys())
-
+            
             # save the overlapped blocks into our allocation
-
-            for consumed_offset in consumed_blocks:
-                block = consumed_alloc.blocks[consumed_offset]
+            for block_offset in consumed_blocks:
+                block = consumed_alloc.blocks[block_offset]
                 allocation.set_block(int(block.address), block, True)
+                del consumed_alloc.blocks[block_offset]
 
-            if consumed_end > end_address:
-                # move the beginning of this region to the end of our reallocated region
-                unconsumed_blocks = filter(lambda x: x+consumed_offset >= size, consumed_alloc.blocks.keys())
-                unconsumed_delta = size - consumed_offset
-
-                for unconsumed_offset in unconsumed_blocks:
-                    consumed_alloc.blocks[unconsumed_offset].offset -= unconsumed_delta
-
-                consumed_alloc.id = end_address
+            if consumed_end <= end_address:
                 del self.allocations[consumed_addr]
-                self.allocations[end_address] = consumed_alloc
-            else:
-                del self.allocations[consumed_addr]
+                continue
+            
+            # this region only overlaps partially, move the beginning of the consumed region
+            # to the end of the new allocation
+            unconsumed_addresses = filter(lambda x: x+consumed_offset >= size, consumed_alloc.addresses.keys())
+            unconsumed_blocks = filter(lambda x: x+consumed_offset >= size, consumed_alloc.blocks.keys())
+            unconsumed_delta = size - consumed_offset
 
+            for unconsumed_offset in unconsumed_blocks:
+                new_offset = unconsumed_offset - unconsumed_delta
+                unconsumed_block = consumed_alloc.blocks[unconsumed_offset]
+                consumed_alloc.blocks[new_offset] = unconsumed_block
+                del consumed_alloc.blocks[unconsumed_offset]
+                    
+                unconsumed_block.address.allocation = consumed_alloc
+                unconsumed_block.address.offset -= unconsumed_delta
+
+            consumed_alloc.id = end_address
+
+            del self.allocations[consumed_addr]
+            self.allocations[end_address] = consumed_alloc
+        
         return allocation
 
 memory = MemoryAllocator()

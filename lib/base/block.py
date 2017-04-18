@@ -3,6 +3,8 @@
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.converters import align
 
+__all__ ['BitspanError', 'Bitspan', 'BlockError', 'Block', 'BlockLink', 'BlockChain']
+
 class BitspanError(ParanoiaError):
     pass
 
@@ -116,6 +118,9 @@ class Block(ParanoiaAgent):
         
         self.address.write_byte(self.value)
 
+        if self.buffer:
+            self.value = None
+
     def __getitem__(self, index):
         if index < 0:
             index += 8
@@ -157,52 +162,13 @@ class BlockLink(Block):
 
     def get_value(self, force=False):
         if self.shift == 0:
-            self.value = self.address.get_block().get_value(force)
-            return self.value
-
-        if self.value is None or force or not self.buffer:
-            bitlist = list()
-            lb = self.address.get_block(0)
-            rb = self.address.get_block(1)
-            self.value = 0
-
-            for i in xrange(8):
-                offset = self.shift + i
-
-                if offset >= 8:
-                    cb = rb
-                else:
-                    cb = lb
-
-                self.value <<= 1
-                self.value |= cb.get_bit(offset % 8, force)
-
-        return self.value
-
-    def set_value(self, value, force=False):
-        if not 0 <= value < 256:
-            raise BlockError('value must be 0 <= value < 256')
-        
-        self.value = value
-
-        if self.shift == 0:
-            self.address.get_block().set_value(value, force)
-        elif force or not self.buffer:
-            self.flush()
-
-    def flush(self):
-        if self.value is None:
-            return
-
-        if self.shift == 0:
-            self.address.get_block().flush()
-            return
+            return self.address.get_block().get_value(force)
 
         lb = self.address.get_block(0)
         rb = self.address.get_block(1)
-        value = self.value
+        value = 0
 
-        for i in reversed(xrange(8)):
+        for i in xrange(8):
             offset = self.shift + i
 
             if offset >= 8:
@@ -210,13 +176,44 @@ class BlockLink(Block):
             else:
                 cb = lb
 
-            cb[offset % 8] = value & 1
-            value >>= 1
+            value <<= 1
+            value |= cb.get_bit(offset % 8, force)
 
-        lb.flush()
-        rb.flush()
+        return value
 
-        self.value = None
+    def set_value(self, value, force=False):
+        if not 0 <= value < 256:
+            raise BlockError('value must be 0 <= value < 256')
+
+        if self.shift == 0:
+            self.address.get_block().set_value(value, force)
+        else:
+            lb = self.address.get_block(0)
+            rb = self.address.get_block(1)
+
+            for i in reversed(xrange(8)):
+                offset = self.shift + i
+
+                if offset >= 8:
+                    cb = rb
+                else:
+                    cb = lb
+
+                cb[offset % 8] = value & 1
+                value >>= 1
+
+        if force or not self.buffer:
+            self.flush()
+
+    def flush(self):
+        if self.shift == 0:
+            self.address.get_block().flush()
+        else:
+            lb = self.address.get_block(0)
+            rb = self.address.get_block(1)
+            
+            lb.flush()
+            rb.flush()
 
 class BlockChain(ParanoiaAgent):
     ADDRESS = None
@@ -240,13 +237,13 @@ class BlockChain(ParanoiaAgent):
         self.chain = list()
 
         chain_length = kwargs.setdefault('size', self.SIZE)
-        self.set_length(chain_length)
+        self.set_size(chain_length)
 
     def set_size(self, chain_length):
         if isinstance(chain_length, int): # interpret as bytespan
             self.size = Bitspan(bytes=chain_length)
         elif isinstance(chain_length, Bitspan):
-            self.size = chain_length
+            self.size = Bitspan(bits=chain_length.bits)
         else:
             raise BlockError('size must be an integer representing the bytespan or a Bitspan object')
         
@@ -274,14 +271,13 @@ class BlockChain(ParanoiaAgent):
             yield link
 
     def block_iterator(self):
-        block_count = align(self.shift + self.size.bits, 8)/8
-
-        for i in block_count:
+        # iterate over the blocks this blockchain uses
+        
+        for i in xrange(int(align(self.size.bits + self.shift, 8)/8)):
             yield self.address.get_block(i)
 
     def flush(self):
-        for block in self.link_iterator():
-            block.flush()
+        self.address.flush(size=self.size.byte_length())
 
     def __getitem__(self, index):
         if index < 0:
@@ -298,3 +294,5 @@ class BlockChain(ParanoiaAgent):
 
         self.chain[index].set_value(int(block_or_int))
 
+    def __iter__(self):
+        return self.link_iterator()
