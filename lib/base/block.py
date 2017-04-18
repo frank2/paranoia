@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
-from paranoia.converters import align
+from paranoia.fundamentals import align
 
-__all__ ['BitspanError', 'Bitspan', 'BlockError', 'Block', 'BlockLink', 'BlockChain']
+__all__ = ['BitspanError', 'Bitspan', 'BlockError', 'Block', 'BlockLink', 'BlockChain']
 
 class BitspanError(ParanoiaError):
     pass
@@ -217,27 +217,72 @@ class BlockLink(Block):
 
 class BlockChain(ParanoiaAgent):
     ADDRESS = None
+    ALLOCATOR = heap
+    AUTO_ALLOCATE = True
     SHIFT = 0
     BUFFER = True
     SIZE = 0
+    MAXIMUM_SIZE = None
+    PARSE_MEMORY = False
 
     def __init__(self, **kwargs):
         from paranoia.base.address import Address
+        from paranoia.base.allocator import Allocator
         
         self.address = kwargs.setdefault('address', self.ADDRESS)
 
-        if self.address is None:
-            raise BlockError('address cannot be None')
-
-        if not isinstance(self.address, Address):
+        if not self.address is None and not isinstance(self.address, Address):
             raise BlockError('address must be an Address object')
 
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+
+        if not isinstance(self.allocator, Allocator):
+            raise BlockError('allocator must be an Allocator instance')
+
+        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.shift = kwargs.setdefault('shift', self.SHIFT)
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
         self.chain = list()
+        self.allocation = None
 
+        maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
+        self.set_maximum_size(maximum_size)
+            
         chain_length = kwargs.setdefault('size', self.SIZE)
         self.set_size(chain_length)
+
+        if self.address is None and not self.auto_allocate:
+            raise BlockError('address is None and auto_allocate is False')
+
+        if self.address is None:
+            self.allocation = self.allocator.allocate(self.blockspan())
+            self.address = self.allocation.address()
+
+        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
+
+        if 'bit_data' in kwargs:
+            self.parse_bit_data(kwargs['bit_data'])
+            self.flush()
+        elif 'link_data' in kwargs:
+            self.parse_link_data(kwargs['link_data'])
+            self.flush()
+        elif 'block_data' in kwargs:
+            self.parse_block_data(kwargs['block_data'])
+            self.flush()
+        elif parse_memory:
+            self.parse_memory()
+            self.flush()
+
+    def set_maximum_size(self, max_size):
+        if isinstance(max_size, int): # interpret as bytespan
+            self.maximum_size = Bitspan(bytes=max_size)
+        elif isinstance(chain_length, Bitspan):
+            self.maximum_size = Bitspan(bits=max_size.bits)
+        else:
+            raise BlockError('size must be an integer representing the bytespan or a Bitspan object')
+
+        if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
+            raise BlockError('new maximum exceeds current size')
 
     def set_size(self, chain_length):
         if isinstance(chain_length, int): # interpret as bytespan
@@ -246,47 +291,88 @@ class BlockChain(ParanoiaAgent):
             self.size = Bitspan(bits=chain_length.bits)
         else:
             raise BlockError('size must be an integer representing the bytespan or a Bitspan object')
-        
-        self.chain = [BlockLink(address=self.address.fork(x)
-                                ,shift=self.shift
-                                ,buffer=self.buffer) for x in xrange(self.size.byte_length())]
+
+        if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
+            raise BlockError('new size exceeds maximum size')
+
+        if not self.allocation is None:
+            self.allocation.reallocate(self.blockspan())
 
     def set_shift(self, shift):
-        for link in self.chain:
-            link.flush()
-            link.shift = shift
-
         self.shift = shift
+
+    def parse_bit_data(self, bit_data):
+        for i in xrange(len(bit_data)):
+            if i >= self.size.bitspan:
+                break
+
+            self[int(i/8)][i%8] = bit_data[i]
+
+    def parse_link_data(self, link_data):
+        if isinstance(link_data, str):
+            link_data = map(ord, link_data)
+
+        for i in xrange(len(link_data)):
+            if i >= len(self):
+                break
+            
+            self[i].set_value(link_data[i])
+
+    def parse_block_data(self, block_data):
+        if isinstance(block_data, str):
+            block_data = map(ord, block_data)
+
+        blocks = list(self.block_iterator())
+        
+        for i in xrange(len(block_data)):
+            if i >= len(blocks):
+                break
+            
+            blocks[i].set_value(block_data[i])
+
+    def parse_memory(self):
+        block_bytes = list()
+
+        for block in self.block_iterator():
+            block_bytes.append(int(block))
+
+        self.parse_block_data(block_bytes)
+
+    def blockspan(self):
+        return int(align(self.size.bits + self.shift, 8)/8)
 
     def bit_iterator(self):
         for i in xrange(self.size.bits):
-            yield self[i/8][i%8]
+            yield self[int(i/8)][i%8]
 
     def byte_iterator(self):
         for link in self.chain:
             yield int(link)
 
     def link_iterator(self):
-        for link in self.chain:
-            yield link
+        return iter(self.chain)
 
     def block_iterator(self):
         # iterate over the blocks this blockchain uses
-        
-        for i in xrange(int(align(self.size.bits + self.shift, 8)/8)):
+        for i in xrange(self.blockspan()):
             yield self.address.get_block(i)
 
     def flush(self):
-        self.address.flush(size=self.size.byte_length())
+        if not self.buffer: # data already flushed
+            return
+        
+        self.address.flush(size=self.blockspan())
 
     def __getitem__(self, index):
         if index < 0:
-            index += len(self.chain)
+            index += len(self)
 
-        if index < 0 or index >= len(self.chain):
+        if index < 0 or index >= len(self):
             raise IndexError(index)
 
-        return self.chain[index]
+        return BlockLink(address=self.address.fork(index)
+                         ,shift=self.shift
+                         ,buffer=self.buffer)
 
     def __setitem__(self, index, block_or_int):
         if not isinstance(block, (Block, BlockLink, int)):
@@ -296,3 +382,10 @@ class BlockChain(ParanoiaAgent):
 
     def __iter__(self):
         return self.link_iterator()
+
+    def __len__(self):
+        return self.size.byte_length()
+
+    def __del__(self):
+        if not self.allocation is None:
+            self.allocation.free()

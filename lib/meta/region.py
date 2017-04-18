@@ -4,12 +4,12 @@ import ctypes
 import inspect
 import sys
 
-from paranoia.base import allocator
-from paranoia.base import address
-from paranoia.base import paranoia_agent
+from paranoia.base.allocator import heap, Allocator
+from paranoia.base.block import BlockChain
+from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.base import parser
-from paranoia.base import declaration
-from paranoia.converters import *
+from paranoia.meta.declaration import Declaration
+from paranoia.fundamentals import *
 
 try:
     import __builtin__
@@ -18,45 +18,26 @@ except ImportError: #python3
 
 __all__ = ['MemoryRegionError', 'sizeof', 'MemoryRegion']
 
-class MemoryRegionError(paranoia_agent.ParanoiaError):
+class MemoryRegionError(ParanoiaError):
     pass
 
-class NewRegion(paranoia_agent.ParanoiaAgent):
-    ADDRESS = None
-    AUTO_ALLOCATE = True
-    ALLOCATOR = allocator.heap
-    BLOCK_CLASS = allocator.Block
-    BYTESPAN = 0
-    BITSPAN = 0
+class NewRegion(BlockChain):
+    DECLARATION = None
+    PARENT_REGION = None
+    VALUE = None
+    BIND = False
+    OVERLAPS = False
+    STATIC = False
+    SHRINK = False
+    ALIGN_BIT = 1
+    ALIGN_BYTE = 8
     ALIGNMENT = 8
-    SHIFT = 0
-    BUFFER = False
 
     def __init__(self, **kwargs):
-        self.address = kwargs.setdefault('address', self.ADDRESS)
-        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
-        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
-        self.block_class = kwargs.setdefault('block_class', self.BLOCK_CLASS)
-        self.bytespan = kwargs.setdefault('bytespan', self.BYTESPAN)
-        self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
-        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
-        self.shift = kwargs.setdefault('shift', self.SHIFT)
-        self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-
-        bitspan_check = align(self.shift + self.bitspan, 8) / 8
-
-        if bitspan_check > self.bytespan:
-            self.bytespan = bitspan_check
-
-        if self.address is None and self.auto_allocate:
-            allocation = self.allocator.allocate(self.bytespan)
-            self.address = allocation.address_object()
-
-        self.blocks = list()
+        super(NewRegion, self).__init__(**kwargs)
         
-        for i in xrange(self.bytespan):
-            self.blocks.append(self.block_class(address=self.address.fork(i), buffer=True, shift=self.shift))
-
+        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
+        
 def sizeof(memory_region):
     if issubclass(memory_region, MemoryRegion):
         return memory_region.static_bytespan()
@@ -236,7 +217,7 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             else:
                 raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
 
-        if not self.memory_base is None and not isinstance(self.memory_base, address.Address):
+        if not self.memory_base is None and not isinstance(self.memory_base, allocator.Address):
             raise MemoryRegionError('memory_base must be an Address object')
 
         if not parse_memory and self.zero_memory and not self.bitspan == 0:

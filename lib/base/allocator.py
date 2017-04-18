@@ -10,148 +10,17 @@ try:
 except ImportError: # python3
     import builtins as __builtin__
 
-from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.fundamentals import align, string_address, malloc, realloc, free
+from paranoia.fundamentals import memset, memmove
 from paranoia.base.address import Address
 from paranoia.base.block import Block
-from paranoia.converters import align, string_address
+from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
 allocators = set()
 memory = None
 heap = None
 
 __all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation']
-
-class MemoryError(ParanoiaError):
-    pass
-
-crt_module = None
-system = platform.system()
-
-if system == 'Windows':
-    crt_module = ctypes.cdll.msvcrt
-elif system.startswith('CYGWIN'):
-    crt_module = ctypes.cdll.LoadLibrary('msvcrt.dll')
-elif system == 'Linux':
-    crt_module = ctypes.cdll.LoadLibrary('libc.so.6')
-elif system == 'Darwin':
-    crt_module = ctypes.cdll.LoadLibrary('libc.dylib')
-else:
-    raise MemoryError('unsupported platform %s' % system)
-
-malloc = crt_module.malloc
-malloc.restype = ctypes.c_void_p
-malloc.argtypes = (ctypes.c_size_t,)
-        
-realloc = crt_module.realloc
-realloc.restype = ctypes.c_void_p
-realloc.argtypes = (ctypes.c_void_p, ctypes.c_size_t)
-
-free = crt_module.free
-free.argtypes = (ctypes.c_void_p,)
-
-memset = ctypes.memset
-memmove = ctypes.memmove
-
-def hexdump(address, size, label=None):
-    data = ctypes.string_at(address, size)
-    dump_size = align(size, 16)
-
-    if label is None:
-        sys.stdout.write('[hexdump @ %X]\n' % address)
-    else:
-        sys.stdout.write('[%s @ %X]\n' % (label, address))
-
-    for i in xrange(dump_size):
-        if i % 16 == 0:
-            sys.stdout.write('[%08X:%04X] ' % ((address+i), i))
-
-        if i < len(data):
-            sys.stdout.write('%02X ' % ord(data[i]))
-        else:
-            sys.stdout.write('   ')
-
-        if i % 16 == 15:
-            base = i - 15
-
-            for j in range(base, base+16):
-                if j < len(data):
-                    char = data[j]
-                else:
-                    char = ' '
-                    
-                val = ord(char)
-
-                if 0x20 <= val <= 0x7F:
-                    sys.stdout.write('%s' % char)
-                else:
-                    sys.stdout.write('.')
-
-            sys.stdout.write('\n')
-
-def bitdump(address, bitspan, bit_offset=0, label=None):
-    bytelist = map(ord, ctypes.string_at(address, align(bit_offset+bitspan, 8)/8))
-    bitlist = list()
-
-    if label is None:
-        sys.stdout.write('[bitdump @ %X]\n' % address)
-    else:
-        sys.stdout.write('[%s @ %X]\n' % (label, address))
-
-    for byte_obj in bytelist:
-        value_bits = list()
-
-        for i in xrange(8):
-            value_bits.append(byte_obj & 1)
-            byte_obj >>= 1
-
-        value_bits.reverse()
-
-        bitlist += value_bits
-
-    byte_iterator = 0
-    bit_iterator = 0
-
-    while byte_iterator < align(len(bytelist), 8):
-        if byte_iterator % 8 == 0:
-            sys.stdout.write('%08X:%04X:X ' % (address+byte_iterator, byte_iterator))
-
-        if byte_iterator < len(bytelist):
-            sys.stdout.write('%02X%6s ' % (bytelist[byte_iterator], ''))
-        else:
-            sys.stdout.write('%8s ' % '')
-
-        if byte_iterator % 8 == 7:
-            for i in xrange(8):
-                if byte_iterator-7+i >= len(bytelist):
-                    break
-                    
-                byte_val = bytelist[byte_iterator-7+i]
-
-                if byte_val >= 32 and byte_val <= 127:
-                    sys.stdout.write(chr(byte_val))
-                else:
-                    sys.stdout.write('.')
-                        
-            sys.stdout.write('\n')
-            sys.stdout.write('%08X:%04X:B ' % (address+(byte_iterator-7), bit_iterator))
-                
-            while bit_iterator < len(bitlist):
-                if bit_iterator < bit_offset or bit_iterator-bit_offset >= bitspan:
-                    sys.stdout.write(' ')
-                else:
-                    sys.stdout.write('%d' % bitlist[bit_iterator])
-
-                if bit_iterator % 8 == 7:
-                    sys.stdout.write(' ')
-
-                bit_iterator += 1
-
-                if bit_iterator % 64 == 0:
-                    break
-
-            sys.stdout.write('\n\n')
-                
-        byte_iterator += 1
 
 class AllocatorError(ParanoiaError):
     pass
@@ -438,15 +307,25 @@ class Allocation(ParanoiaAgent):
                 
             return
 
-        for i in range(start_delta, end_delta):
-            if i in self.blocks and not self.blocks[i].value is None and len(block_range) == 0:
+        for i in range(start_delta, end_delta+1):
+            if not i == end_delta and i in self.blocks and not self.blocks[i].value is None and len(block_range) == 0:
                 block_range.append(i)
-            elif (not i in self.blocks or self.blocks[i].value is None) and len(block_range) == 1:
+            elif i == end_delta or (not i in self.blocks or self.blocks[i].value is None) and len(block_range) == 1:
+                if len(block_range) == 0: # end of data
+                    break
+                
                 block_range.append(i)
 
                 block_start, block_end = block_range
-                byte_array = bytes(map(lambda x: self.blocks[x].value, range(*block_range)))
-                string_buffer = ctypes.create_string_buffer(byte_array)
+                byte_array = bytearray(map(lambda x: self.blocks[x].value, range(*block_range)))
+                
+                long = getattr(__builtin__, 'long', None)
+
+                if not long is None: # python 2
+                    string_buffer = ctypes.create_string_buffer(str(byte_array))
+                else:
+                    string_buffer = ctypes.create_string_buffer(byte_array)
+
                 string_address = ctypes.addressof(string_buffer)
 
                 memmove(self.id+block_start, string_address, len(byte_array))
@@ -734,20 +613,20 @@ class HeapAllocator(Allocator):
         return allocation
 
     def free(self, address):
-        if address not in self.address_map:
+        if address not in self.allocations:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
-        allocation = self.address_map[address]
+        allocation = self.allocations[address]
 
         memset(address, 0, allocation.size)
         free(address)
         allocation.address = 0
         allocation.size = 0
         
-        del self.address_map[address]
+        del self.allocations[address]
 
     def __del__(self):
-        for address in self.address_map:
+        for address in self.allocations:
             self.free(address)
 
 heap = HeapAllocator()
