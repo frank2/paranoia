@@ -21,22 +21,65 @@ __all__ = ['MemoryRegionError', 'sizeof', 'MemoryRegion']
 class MemoryRegionError(ParanoiaError):
     pass
 
-class NewRegion(BlockChain):
+class RegionError(ParanoiaError):
+    pass
+
+def is_region(obj):
+    return inspect.isclass(obj) and issubclass(obj, NewRegion)
+
+class Region(BlockChain):
     DECLARATION = None
     PARENT_REGION = None
     VALUE = None
     BIND = False
     OVERLAPS = False
-    STATIC = False
     SHRINK = False
+    STATIC = False
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
-    ALIGNMENT = 8
+    ALIGN_BLOCK = None
+    ALIGNMENT = None
 
     def __init__(self, **kwargs):
-        super(NewRegion, self).__init__(**kwargs)
-        
+        from paranoia.meta.declaration import Declaration
+
+        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
+        self.init_finished = False
+
+        if is_region(self.declaration):
+            self.declaration = self.declaration.declare(**kwargs)
+            self.declaration.instance = self
+        elif self.declaration is None:
+            self.declaration = Declaration(base_class=self.__class__, args=kwargs)
+
+        if not isinstance(self.declaration, Declaration):
+            raise RegionError('declaration must be a Declaration object')
+        elif not issubclass(self.declaration.base_class, self.__class__):
+            raise RegionError('declaration base_class mismatch')
+
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
+        self.bind = kwargs.setdefault('bind', self.BIND)
+        self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
+        self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
+        self.shrink = kwargs.setdefault('shrink', self.SHRINK)
+        self.static = kwargs.setdefault('static', self.STATIC)
+
+        self.subregions = dict()
+        
+        super(Region, self).__init__(**kwargs)
+
+        value = kwargs.setdefault('value', self.VALUE)
+
+        if not value is None:
+            self.set_value(value)
+
+        self.init_finished = True
+
+    def set_value(self, value):
+        raise RegionError('set_value not implemented')
+
+    def get_value(self):
+        raise RegionError('get_value not implemented')
         
 def sizeof(memory_region):
     if issubclass(memory_region, MemoryRegion):
