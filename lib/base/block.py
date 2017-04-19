@@ -334,7 +334,7 @@ class BlockChain(ParanoiaAgent):
         block_bytes = list()
 
         for block in self.block_iterator():
-            block_bytes.append(int(block))
+            block_bytes.append(block.get_value(force=True))
 
         self.parse_block_data(block_bytes)
 

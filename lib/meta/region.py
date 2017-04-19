@@ -35,6 +35,7 @@ class Region(BlockChain):
     OVERLAPS = False
     SHRINK = False
     STATIC = False
+    VOLATILE = False
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
     ALIGN_BLOCK = None
@@ -63,6 +64,11 @@ class Region(BlockChain):
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
         self.shrink = kwargs.setdefault('shrink', self.SHRINK)
         self.static = kwargs.setdefault('static', self.STATIC)
+        self.size = kwargs.setdefault('size', self.SIZE)
+
+        if self.size is None:
+            self.size = self.__class__.declarative_size(**kwargs)
+            kwargs['size'] = self.size
 
         self.subregions = dict()
         
@@ -80,202 +86,6 @@ class Region(BlockChain):
 
     def get_value(self):
         raise RegionError('get_value not implemented')
-        
-def sizeof(memory_region):
-    if issubclass(memory_region, MemoryRegion):
-        return memory_region.static_bytespan()
-    elif isinstance(memory_region, MemoryRegion):
-        return memory_region.bytespan()
-    else:
-        raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
-
-def is_region_class(obj):
-    return inspect.isclass(obj) and issubclass(obj, MemoryRegion)
-
-def ensure_declaration(obj):
-    if isinstance(obj, declaration.Declaration):
-        return obj
-    elif is_region_class(obj):
-        return obj.declare()
-    else:
-        raise MemoryRegionError('declaration must be either a Declaration object or a MemoryRegion class')
-
-class MemoryRegionParser(parser.Parser):
-    def __init__(self, decl):
-        parser.Parser.__init__(self, decl)
-        self.bits_consumed = 0
-        
-    def consume(self):
-        decl = self.declaration
-        consumed = super(MemoryRegionParser, self).consume()
-
-        if not decl.instance is None:
-            decl.instance.write_bits(consumed, self.bits_consumed)
-            
-        self.bits_consumed += len(consumed)
-
-        return consumed
-
-    def feed(self, data=None):
-        if not self.state == parser.Parser.STATE_FEED:
-            raise parser.ParserError('parser not ready for feeding')
-
-        if data is None:
-            if len(self.tape):
-                data = self.tape
-            elif self.declaration.get_arg('parse_memory'):
-                data = self.read_bits(self.last_state.want, self.bits_consumed)
-            else:
-                raise ParseError('unexpected end of file')
-
-        self.gen_obj.send(data)
-        self.state = parser.Parser.STATE_CONSUME
-        
-    def generate(self):
-        decl = self.declaration
-        data = decl.get_arg('data')
-        bitshift = decl.get_arg('bitshift')
-        bitspan = decl.bitspan()
-
-        tape = bytelist_to_bitlist(map(ord, data))
-
-        if bitshift > 0:
-            tape = tape[bitshift:]
-
-        yield tape
-
-        consumed = tape[:bitspan]
-        total_read = len(consumed)
-        bitspan -= total_read
-        unconsumed = tape[total_read:]
-
-        while bitspan > 0:
-            yield parser.ParserState(unconsumed, total_read, bitspan)
-            tape = yield
-                
-            consumed = tape[:bitspan]
-            total_read = len(consumed)
-            bitspan -= total_read
-            unconsumed = tape[total_read:]
-
-        yield parser.ParserState(unconsumed, total_read, 0)
-    
-class MemoryRegion(paranoia_agent.ParanoiaAgent):
-    DECLARATION = None
-    BITSPAN = None
-    MEMORY_BASE = None
-    AUTO_ALLOCATE = True
-    ALLOCATION = None
-    PARENT_REGION = None
-    ALLOCATOR_CLASS = allocator.Allocator
-    ALLOCATOR = allocator.heap
-    PARSER_CLASS = MemoryRegionParser
-    DATA = None
-    VALUE = None
-    ZERO_MEMORY = False
-    BIND = False
-    OVERLAPS = False
-    PARSE_MEMORY = False
-    STATIC = False
-    SHRINK = False
-    MAXIMUM_SIZE = 0
-    BITSHIFT = 0
-    ALIGNMENT = 8
-    ALIGN_BIT = 1
-    ALIGN_BYTE = 8
-
-    def __init__(self, **kwargs):
-        paranoia_agent.ParanoiaAgent.__init__(self)
-
-        # declaration must come first to properly attribute values
-        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
-
-        if not self.declaration is None:
-            self.declaration = ensure_declaration(self.declaration)
-        else:
-            self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
-            
-        self.declaration.instance = self
-
-        kwargs['declaration'] = self.declaration
-
-        if not issubclass(self.declaration.base_class, self.__class__):
-            raise MemoryRegionError('declaration base_class mismatch')
-
-        self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
-        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
-        self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
-        self.parser_class = kwargs.setdefault('parser_class', self.PARSER_CLASS)
-        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
-        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
-        self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
-        self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
-        self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
-        self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
-        self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
-        self.bind = kwargs.setdefault('bind', self.BIND)
-        self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
-        self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
-        self.shrink = kwargs.setdefault('shrink', self.SHRINK)
-        self.static = False # change this at the end of the constructor
-        self.subregions = dict()
-        self.subregion_offsets = dict()
-        self.init_finished = False
-        
-        data = kwargs.setdefault('data', self.DATA)
-        value = kwargs.setdefault('value', self.VALUE)
-        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
-        parser = None
-
-        if not data is None and not isinstance(data, str):
-            raise MemoryRegionError('data must be a string')
-
-        if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
-            raise MemoryRegionError('allocation must implement allocator.Allocation')
-
-        if not issubclass(self.allocator_class, allocator.Allocator):
-            raise MemoryRegionError('allocator class must implement allocator.Allocator')
-        if self.alignment is None or self.alignment < 0:
-            raise MemoryRegionError('alignment cannot be None or less than 0')
-
-        if self.bitspan is None:
-            raise MemoryRegionError('bitspan cannot be None')
-
-        if self.bitshift > 8 or self.bitshift < 0:
-            raise MemoryRegionError('bitshift must be within the range of 0 <= x < 8')
-
-        if not self.parent_region is None and not isinstance(self.parent_region, MemoryRegion):
-            raise MemoryRegionError('parent_region must implement MemoryRegion')
-
-        if self.allocator is None:
-            self.allocator = self.allocator_class(**kwargs)
-        elif not isinstance(self.allocator, allocator.Allocator):
-            raise MemoryRegionError('allocator must implement allocator.Allocator')
-
-        if self.memory_base is None:
-            if self.auto_allocate:
-                self.allocate()
-            elif self.allocation:
-                self.memory_base = self.allocation.address_object()
-            else:
-                raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
-
-        if not self.memory_base is None and not isinstance(self.memory_base, allocator.Address):
-            raise MemoryRegionError('memory_base must be an Address object')
-
-        if not parse_memory and self.zero_memory and not self.bitspan == 0:
-            self.write_bits([0] * self.bitspan)
-
-        if parse_memory or not data is None:
-            parser = self.declaration.parser()
-        elif not value is None:
-            self.set_value(value)
-
-        if not parser is None:
-            parser.run()
-
-        self.static = kwargs.setdefault('static', self.STATIC)
-        self.init_finished = True
 
     def is_bound(self):
         return self.bind and self.init_finished
@@ -509,6 +319,202 @@ class MemoryRegion(paranoia_agent.ParanoiaAgent):
             return 0
         else:
             return align(fixed_offset, alignment) % 8
+        
+def sizeof(memory_region):
+    if issubclass(memory_region, MemoryRegion):
+        return memory_region.static_bytespan()
+    elif isinstance(memory_region, MemoryRegion):
+        return memory_region.bytespan()
+    else:
+        raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
+
+def is_region_class(obj):
+    return inspect.isclass(obj) and issubclass(obj, MemoryRegion)
+
+def ensure_declaration(obj):
+    if isinstance(obj, declaration.Declaration):
+        return obj
+    elif is_region_class(obj):
+        return obj.declare()
+    else:
+        raise MemoryRegionError('declaration must be either a Declaration object or a MemoryRegion class')
+
+class MemoryRegionParser(parser.Parser):
+    def __init__(self, decl):
+        parser.Parser.__init__(self, decl)
+        self.bits_consumed = 0
+        
+    def consume(self):
+        decl = self.declaration
+        consumed = super(MemoryRegionParser, self).consume()
+
+        if not decl.instance is None:
+            decl.instance.write_bits(consumed, self.bits_consumed)
+            
+        self.bits_consumed += len(consumed)
+
+        return consumed
+
+    def feed(self, data=None):
+        if not self.state == parser.Parser.STATE_FEED:
+            raise parser.ParserError('parser not ready for feeding')
+
+        if data is None:
+            if len(self.tape):
+                data = self.tape
+            elif self.declaration.get_arg('parse_memory'):
+                data = self.read_bits(self.last_state.want, self.bits_consumed)
+            else:
+                raise ParseError('unexpected end of file')
+
+        self.gen_obj.send(data)
+        self.state = parser.Parser.STATE_CONSUME
+        
+    def generate(self):
+        decl = self.declaration
+        data = decl.get_arg('data')
+        bitshift = decl.get_arg('bitshift')
+        bitspan = decl.bitspan()
+
+        tape = bytelist_to_bitlist(map(ord, data))
+
+        if bitshift > 0:
+            tape = tape[bitshift:]
+
+        yield tape
+
+        consumed = tape[:bitspan]
+        total_read = len(consumed)
+        bitspan -= total_read
+        unconsumed = tape[total_read:]
+
+        while bitspan > 0:
+            yield parser.ParserState(unconsumed, total_read, bitspan)
+            tape = yield
+                
+            consumed = tape[:bitspan]
+            total_read = len(consumed)
+            bitspan -= total_read
+            unconsumed = tape[total_read:]
+
+        yield parser.ParserState(unconsumed, total_read, 0)
+    
+class MemoryRegion(paranoia_agent.ParanoiaAgent):
+    DECLARATION = None
+    BITSPAN = None
+    MEMORY_BASE = None
+    AUTO_ALLOCATE = True
+    ALLOCATION = None
+    PARENT_REGION = None
+    ALLOCATOR_CLASS = allocator.Allocator
+    ALLOCATOR = allocator.heap
+    PARSER_CLASS = MemoryRegionParser
+    DATA = None
+    VALUE = None
+    ZERO_MEMORY = False
+    BIND = False
+    OVERLAPS = False
+    PARSE_MEMORY = False
+    STATIC = False
+    SHRINK = False
+    MAXIMUM_SIZE = 0
+    BITSHIFT = 0
+    ALIGNMENT = 8
+    ALIGN_BIT = 1
+    ALIGN_BYTE = 8
+
+    def __init__(self, **kwargs):
+        paranoia_agent.ParanoiaAgent.__init__(self)
+
+        # declaration must come first to properly attribute values
+        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
+
+        if not self.declaration is None:
+            self.declaration = ensure_declaration(self.declaration)
+        else:
+            self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
+            
+        self.declaration.instance = self
+
+        kwargs['declaration'] = self.declaration
+
+        if not issubclass(self.declaration.base_class, self.__class__):
+            raise MemoryRegionError('declaration base_class mismatch')
+
+        self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+        self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
+        self.parser_class = kwargs.setdefault('parser_class', self.PARSER_CLASS)
+        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
+        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
+        self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
+        self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
+        self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
+        self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
+        self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
+        self.bind = kwargs.setdefault('bind', self.BIND)
+        self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
+        self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
+        self.shrink = kwargs.setdefault('shrink', self.SHRINK)
+        self.static = False # change this at the end of the constructor
+        self.subregions = dict()
+        self.subregion_offsets = dict()
+        self.init_finished = False
+        
+        data = kwargs.setdefault('data', self.DATA)
+        value = kwargs.setdefault('value', self.VALUE)
+        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
+        parser = None
+
+        if not data is None and not isinstance(data, str):
+            raise MemoryRegionError('data must be a string')
+
+        if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
+            raise MemoryRegionError('allocation must implement allocator.Allocation')
+
+        if not issubclass(self.allocator_class, allocator.Allocator):
+            raise MemoryRegionError('allocator class must implement allocator.Allocator')
+        if self.alignment is None or self.alignment < 0:
+            raise MemoryRegionError('alignment cannot be None or less than 0')
+
+        if self.bitspan is None:
+            raise MemoryRegionError('bitspan cannot be None')
+
+        if self.bitshift > 8 or self.bitshift < 0:
+            raise MemoryRegionError('bitshift must be within the range of 0 <= x < 8')
+
+        if not self.parent_region is None and not isinstance(self.parent_region, MemoryRegion):
+            raise MemoryRegionError('parent_region must implement MemoryRegion')
+
+        if self.allocator is None:
+            self.allocator = self.allocator_class(**kwargs)
+        elif not isinstance(self.allocator, allocator.Allocator):
+            raise MemoryRegionError('allocator must implement allocator.Allocator')
+
+        if self.memory_base is None:
+            if self.auto_allocate:
+                self.allocate()
+            elif self.allocation:
+                self.memory_base = self.allocation.address_object()
+            else:
+                raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
+
+        if not self.memory_base is None and not isinstance(self.memory_base, allocator.Address):
+            raise MemoryRegionError('memory_base must be an Address object')
+
+        if not parse_memory and self.zero_memory and not self.bitspan == 0:
+            self.write_bits([0] * self.bitspan)
+
+        if parse_memory or not data is None:
+            parser = self.declaration.parser()
+        elif not value is None:
+            self.set_value(value)
+
+        if not parser is None:
+            parser.run()
+
+        self.static = kwargs.setdefault('static', self.STATIC)
+        self.init_finished = True
 
     def bytespan(self):
         aligned = align(self.bitshift+self.bitspan, self.alignment)

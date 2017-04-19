@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 
 from paranoia.base import paranoia_agent
-from paranoia.converters import dict_merge
-
-import traceback
+from paranoia.fundamentals import dict_merge
 
 __all__ = ['DeclarationError', 'Declaration']
 
@@ -15,10 +13,15 @@ class Declaration(paranoia_agent.ParanoiaAgent):
     ARGS = None
 
     def __init__(self, **kwargs):
+        from paranoia.meta.region import is_region
+        
         self.base_class = kwargs.setdefault('base_class', self.BASE_CLASS)
 
         if self.base_class is None:
             raise DeclarationError('base_class cannot be None')
+
+        if not is_region(self.base_class):
+            raise DeclarationError('base_class must implement Region')
 
         self.args = kwargs.setdefault('args', self.ARGS)
 

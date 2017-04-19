@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+try:
+    import __builtin__
+except ImportError: # python3
+    import builtins as __builtin__
+
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
 __all__ = ['AddressError', 'Address']
@@ -101,7 +106,7 @@ class Address(ParanoiaAgent):
         return self.allocation.write_bits(int(self)+bit_offset/8, bit_list, bit_offset % 8, force, direct)
 
     def flush(self, offset=0, size=None):
-        self.allocation.flush(int(self)+offset, size)
+        self.allocation.flush(id_val=int(self)+offset, size=size)
 
     def __int__(self):
         return self.value()
