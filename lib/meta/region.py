@@ -4,6 +4,7 @@ import ctypes
 import inspect
 import sys
 
+from paranoia.base.address import Address
 from paranoia.base.allocator import heap, Allocator
 from paranoia.base.block import BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
@@ -25,11 +26,12 @@ class RegionError(ParanoiaError):
     pass
 
 def is_region(obj):
-    return inspect.isclass(obj) and issubclass(obj, NewRegion)
+    return inspect.isclass(obj) and issubclass(obj, Region)
 
 class Region(BlockChain):
     DECLARATION = None
     PARENT_REGION = None
+    ALIGNMENT = None
     VALUE = None
     BIND = False
     OVERLAPS = False
@@ -39,13 +41,11 @@ class Region(BlockChain):
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
     ALIGN_BLOCK = None
-    ALIGNMENT = None
 
     def __init__(self, **kwargs):
         from paranoia.meta.declaration import Declaration
 
         self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
-        self.init_finished = False
 
         if is_region(self.declaration):
             self.declaration = self.declaration.declare(**kwargs)
@@ -58,6 +58,8 @@ class Region(BlockChain):
         elif not issubclass(self.declaration.base_class, self.__class__):
             raise RegionError('declaration base_class mismatch')
 
+        self.init_finished = False
+
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.bind = kwargs.setdefault('bind', self.BIND)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
@@ -67,10 +69,11 @@ class Region(BlockChain):
         self.size = kwargs.setdefault('size', self.SIZE)
 
         if self.size is None:
-            self.size = self.__class__.declarative_size(**kwargs)
+            self.size = self.__class__.static_size(**kwargs)
             kwargs['size'] = self.size
 
         self.subregions = dict()
+        self.subregion_offsets = dict()
         
         super(Region, self).__init__(**kwargs)
 
@@ -91,11 +94,11 @@ class Region(BlockChain):
         return self.bind and self.init_finished
 
     def rebase(self, new_base, new_shift):
-        if not isinstance(new_base, address.Address):
+        if not isinstance(new_base, Address):
             raise MemoryRegionError('new memory base must be an Address object')
 
-        self.memory_base = new_base
-        self.bitshift = new_shift
+        self.address = new_base
+        self.shift = new_shift
 
         regions = self.subregion_offsets.items()
         regions.sort(lambda x,y: cmp(x[1], y[1]))
@@ -109,8 +112,8 @@ class Region(BlockChain):
             if not decl.instance is None:
                 decl.instance.rebase(new_sub_base, new_sub_shift)
             else:
-                decl.set_arg('memory_base', new_sub_base)
-                decl.set_arg('bitshift', new_sub_shift)
+                decl.set_arg('address', new_sub_base)
+                decl.set_arg('shift', new_sub_shift)
 
     def subregion_ranges(self):
         regions = self.subregion_offsets.items()
@@ -119,7 +122,7 @@ class Region(BlockChain):
 
         for region in regions:
             ident, offset = region
-            result.append((offset, offset + self.subregions[ident].bitspan()))
+            result.append((offset, offset + int(self.subregions[ident].size())))
 
         return result
 
@@ -161,32 +164,32 @@ class Region(BlockChain):
         return end
 
     def has_subregion(self, decl):
-        if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+        if not isinstance(decl, Declaration):
+            raise RegionError('decl must be a Declaration object')
 
         return id(decl) in self.subregions
 
     def declare_subregion(self, decl, bit_offset=None):
-        if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+        if not isinstance(decl, Declaration):
+            raise RegionError('decl must be a Declaration object')
 
         if self.has_subregion(decl):
-            raise MemoryRegionError('region already has subregion declaration')
+            raise RegionError('region already has subregion declaration')
         
         if bit_offset is None:
             bit_offset = align(self.next_subregion_offset(), decl.alignment())
         else:
             bit_offset = align(bit_offset, decl.alignment())
         
-        if self.in_subregion(bit_offset, decl.bitspan()):
-             raise MemoryRegionError('subregion declaration overwrites another subregion')
+        if self.in_subregion(bit_offset, int(decl.size())):
+             raise RegionError('subregion declaration overwrites another subregion')
 
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
 
-        if bit_offset+decl.bitspan() > self.shifted_bitspan():
+        if bit_offset+int(decl.size()) > self.shifted_size():
             try:
-                self.accomodate_subregion(decl, decl.bitspan())
+                self.accomodate_subregion(decl, decl.size())
             except Exception as e:
                 del self.subregions[id(decl)]
                 del self.subregion_offsets[id(decl)]
@@ -198,17 +201,17 @@ class Region(BlockChain):
         if not decl.instance is None:
             decl.instance.rebase(new_base, new_shift)
         else:
-            decl.set_arg('memory_base', new_base)
-            decl.set_arg('bitshift', new_shift)
+            decl.set_arg('address', new_base)
+            decl.set_arg('shift', new_shift)
 
         return decl
 
     def remove_subregion(self, decl):
-        if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+        if not isinstance(decl, Declaration):
+            raise RegionError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
-            raise MemoryRegionError('no subregion found')
+            raise RegionError('no subregion found')
         
         if not decl.instance is None and decl.instance.zero_memory:
             decl.instance.write_bits([0] * decl.bitspan())
@@ -319,6 +322,73 @@ class Region(BlockChain):
             return 0
         else:
             return align(fixed_offset, alignment) % 8
+
+class NumericRegion(Region):
+    ENDIANNESS = 0
+    SIGNAGE = 0
+    LITTLE_ENDIAN = 0
+    BIG_ENDIAN = 1
+    UNSIGNED = 0
+    SIGNED = 1
+
+    def __init__(self, **kwargs):
+        self.endianness = kwargs.setdefault('endianness', self.ENDIANNESS)
+
+        if not self.endianness == self.LITTLE_ENDIAN and not self.endianness == self.BIG_ENDIAN:
+            raise RegionError('endianness must be NumericRegion.LITTLE_ENDIAN or NumericRegion.BIG_ENDIAN')
+
+        self.signage = kwargs.setdefault('signage', self.SIGNAGE)
+
+        if not self.signage == self.UNSIGNED and not self.signage == self.SIGNED:
+            raise RegionError('signage must be NumericRegion.SIGNED or NumericRegion.UNSIGNED')
+
+        super(NumericRegion, self).__init__(**kwargs)
+
+    def set_value(self, value):
+        value_bits = list()
+
+        if value < 0:
+            mask = 2 ** int(self.size) - 1
+            value = (value & mask) - 1
+
+        for i in xrange(int(self.size)):
+            value_bits.append(value & 1)
+            value >>= 1
+
+        value_bits.reverse()
+
+        links = list(self.link_iterator())
+
+        if self.endianness == self.LITTLE_ENDIAN:
+            links.reverse()
+
+        for i in xrange(int(self.size)):
+            links[int(i/8)][i%8] = value_bits[i]
+
+    def get_value(self):
+        value = 0
+
+        links = list(self.link_iterator())
+
+        if self.endianness == self.LITTLE_ENDIAN:
+            links.reverse()
+
+        signed_bit = 0
+        
+        for i in xrange(int(self.size)):
+            if i == 0 and self.signage:
+                signed_bit = links[int(i/8)][i%8]
+            
+            value <<= 1
+            value |= links[int(i/8)][i%8]
+
+        if signed_bit == 1:
+            mask = 2 ** int(self.size) - 1
+            value ^= mask
+            value += 1
+            value *= -1
+
+        return value
         
 def sizeof(memory_region):
     if issubclass(memory_region, MemoryRegion):
@@ -399,15 +469,15 @@ class MemoryRegionParser(parser.Parser):
 
         yield parser.ParserState(unconsumed, total_read, 0)
     
-class MemoryRegion(paranoia_agent.ParanoiaAgent):
+class MemoryRegion(ParanoiaAgent):
     DECLARATION = None
     BITSPAN = None
     MEMORY_BASE = None
     AUTO_ALLOCATE = True
     ALLOCATION = None
     PARENT_REGION = None
-    ALLOCATOR_CLASS = allocator.Allocator
-    ALLOCATOR = allocator.heap
+    ALLOCATOR_CLASS = Allocator
+    ALLOCATOR = heap
     PARSER_CLASS = MemoryRegionParser
     DATA = None
     VALUE = None

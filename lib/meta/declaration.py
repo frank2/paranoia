@@ -40,13 +40,13 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         self.instance = self.base_class(**kwargs)
         return self.instance
 
-    def bitspan(self, **kwargs):
+    def size(self, **kwargs):
         dict_merge(kwargs, self.args)
         
-        if 'bitspan' not in kwargs:
-            return self.base_class.static_bitspan(**kwargs)
+        if not 'size' in kwargs:
+            return self.base_class.static_size(**kwargs)
 
-        return self.args['bitspan']
+        return self.args['size']
 
     def alignment(self):
         if 'alignment' not in self.args:
@@ -68,9 +68,6 @@ class Declaration(paranoia_agent.ParanoiaAgent):
                              ,args=dict(list(self.args.items())[:]))
 
         return copied
-
-    def parser(self):
-        return self.get_arg('parser_class')(self)
 
     def __repr__(self):
         return '<Declaration:%s>' % self.base_class.__name__

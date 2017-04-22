@@ -13,14 +13,16 @@ except ImportError: # python3
 from paranoia.fundamentals import align, string_address, malloc, realloc, free
 from paranoia.fundamentals import memset, memmove
 from paranoia.base.address import Address
-from paranoia.base.block import Block
+from paranoia.base.block import Block, BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
 allocators = set()
 memory = None
 heap = None
 
-__all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation']
+__all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation'
+           ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'heap'
+           ,'memory', 'allocators']
 
 class AllocatorError(ParanoiaError):
     pass
@@ -593,7 +595,7 @@ class HeapAllocator(Allocator):
         if not isinstance(address, (int, long)):
             raise AllocatorError('integer value not given for address')
 
-        if address not in self.address_map:
+        if not address in self.allocations:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
         allocation = self.allocations[address]
@@ -630,3 +632,4 @@ class HeapAllocator(Allocator):
             self.free(address)
 
 heap = HeapAllocator()
+BlockChain.ALLOCATOR = heap

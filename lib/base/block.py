@@ -1,53 +1,10 @@
 #!/usr/bin/env python
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.size import Size
 from paranoia.fundamentals import align
 
-__all__ = ['BitspanError', 'Bitspan', 'BlockError', 'Block', 'BlockLink', 'BlockChain']
-
-class BitspanError(ParanoiaError):
-    pass
-
-class Bitspan(ParanoiaAgent):
-    BYTES = None
-    BITS = 0
-    
-    def __init__(self, **kwargs):
-        byte_count = kwargs.setdefault('bytes', self.BYTES)
-        bit_count = kwargs.setdefault('bits', self.BITS)
-
-        if not bit_count is None and not isinstance(bit_count, int):
-            raise BitspanError('bit count must be an int')
-
-        if not byte_count is None and not isinstance(byte_count, int):
-            raise BitspanError('byte count must be an int')
-        
-        if byte_count is None and not bit_count is None:
-            self.set_bits(bit_count)
-        elif bit_count is None and not byte_count is None:
-            self.set_bytes(byte_count)
-        elif not bit_count is None and not byte_count is None:
-            if bit_count > byte_count * 8:
-                self.set_bits(bit_count)
-            else:
-                self.set_bytes(byte_count)
-        else:
-            raise BitspanError('must provide either bits or bytes to constructor')
-
-    def set_bits(self, bits):
-        self.bits = bits
-
-    def set_bytes(self, byte_count):
-        self.bits = byte_count * 8
-
-    def byte_offset(self):
-        return int(self.bits/8)
-
-    def byte_length(self):
-        return int(align(self.bits, 8)/8)
-
-    def __int__(self):
-        return self.bits
+__all__ = ['BlockError', 'Block', 'BlockLink', 'BlockChain']
     
 class BlockError(ParanoiaError):
     pass
@@ -217,7 +174,7 @@ class BlockLink(Block):
 
 class BlockChain(ParanoiaAgent):
     ADDRESS = None
-    ALLOCATOR = heap
+    ALLOCATOR = None # default allocator gets set to heap in allocator.py
     AUTO_ALLOCATE = True
     SHIFT = 0
     BUFFER = True
@@ -274,23 +231,27 @@ class BlockChain(ParanoiaAgent):
             self.flush()
 
     def set_maximum_size(self, max_size):
-        if isinstance(max_size, int): # interpret as bytespan
-            self.maximum_size = Bitspan(bytes=max_size)
-        elif isinstance(chain_length, Bitspan):
-            self.maximum_size = Bitspan(bits=max_size.bits)
+        if max_size is None:
+            self.maximum_size = None
+        elif isinstance(max_size, int): # interpret as bytespan
+            self.maximum_size = Size(bytes=max_size)
+        elif isinstance(max_size, Size):
+            self.maximum_size = Size(bits=max_size.bits)
         else:
-            raise BlockError('size must be an integer representing the bytespan or a Bitspan object')
+            raise BlockError('size must be an integer representing the bytespan or a Size object')
 
         if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
             raise BlockError('new maximum exceeds current size')
 
     def set_size(self, chain_length):
+        self.flush()
+        
         if isinstance(chain_length, int): # interpret as bytespan
-            self.size = Bitspan(bytes=chain_length)
-        elif isinstance(chain_length, Bitspan):
-            self.size = Bitspan(bits=chain_length.bits)
+            self.size = Size(bytes=chain_length)
+        elif isinstance(chain_length, Size):
+            self.size = Size(bits=chain_length.bits)
         else:
-            raise BlockError('size must be an integer representing the bytespan or a Bitspan object')
+            raise BlockError('size must be an integer representing the bytespan or a Size object')
 
         if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
             raise BlockError('new size exceeds maximum size')
@@ -299,11 +260,20 @@ class BlockChain(ParanoiaAgent):
             self.allocation.reallocate(self.blockspan())
 
     def set_shift(self, shift):
+        self.flush()
+        
+        old_span = self.blockspan()
+        
         self.shift = shift
+
+        new_span = self.blockspan()
+
+        if not old_span == new_span and not self.allocation is None:
+            self.allocation.reallocate(self.blockspan())
 
     def parse_bit_data(self, bit_data):
         for i in xrange(len(bit_data)):
-            if i >= self.size.bitspan:
+            if i >= self.size.bits:
                 break
 
             self[int(i/8)][i%8] = bit_data[i]
@@ -345,12 +315,13 @@ class BlockChain(ParanoiaAgent):
         for i in xrange(self.size.bits):
             yield self[int(i/8)][i%8]
 
-    def byte_iterator(self):
-        for link in self.chain:
-            yield int(link)
-
     def link_iterator(self):
-        return iter(self.chain)
+        for i in xrange(self.size.byte_length()):
+            yield self[i]
+
+    def byte_iterator(self):
+        for link in self.link_iterator():
+            yield int(link)
 
     def block_iterator(self):
         # iterate over the blocks this blockchain uses
@@ -358,10 +329,8 @@ class BlockChain(ParanoiaAgent):
             yield self.address.get_block(i)
 
     def flush(self):
-        if not self.buffer: # data already flushed
-            return
-        
-        self.address.flush(size=self.blockspan())
+        if not self.address is None:
+            self.address.flush(size=self.blockspan())
 
     def __getitem__(self, index):
         if index < 0:
@@ -378,7 +347,7 @@ class BlockChain(ParanoiaAgent):
         if not isinstance(block, (Block, BlockLink, int)):
             raise BlockError('block must be a BlockLink, Block or int')
 
-        self.chain[index].set_value(int(block_or_int))
+        self[index].set_value(int(block_or_int))
 
     def __iter__(self):
         return self.link_iterator()
