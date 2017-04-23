@@ -178,7 +178,7 @@ class BlockChain(ParanoiaAgent):
     AUTO_ALLOCATE = True
     SHIFT = 0
     BUFFER = True
-    SIZE = 0
+    SIZE = Size(bits=0)
     MAXIMUM_SIZE = None
     PARSE_MEMORY = False
 
@@ -199,7 +199,6 @@ class BlockChain(ParanoiaAgent):
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.shift = kwargs.setdefault('shift', self.SHIFT)
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-        self.chain = list()
         self.allocation = None
 
         maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
@@ -219,16 +218,12 @@ class BlockChain(ParanoiaAgent):
 
         if 'bit_data' in kwargs:
             self.parse_bit_data(kwargs['bit_data'])
-            self.flush()
         elif 'link_data' in kwargs:
             self.parse_link_data(kwargs['link_data'])
-            self.flush()
         elif 'block_data' in kwargs:
             self.parse_block_data(kwargs['block_data'])
-            self.flush()
         elif parse_memory:
             self.parse_memory()
-            self.flush()
 
     def set_maximum_size(self, max_size):
         if max_size is None:
@@ -246,12 +241,10 @@ class BlockChain(ParanoiaAgent):
     def set_size(self, chain_length):
         self.flush()
         
-        if isinstance(chain_length, int): # interpret as bytespan
-            self.size = Size(bytes=chain_length)
-        elif isinstance(chain_length, Size):
+        if isinstance(chain_length, Size):
             self.size = Size(bits=chain_length.bits)
         else:
-            raise BlockError('size must be an integer representing the bytespan or a Size object')
+            raise BlockError('size must be a Size object')
 
         if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
             raise BlockError('new size exceeds maximum size')
@@ -261,6 +254,9 @@ class BlockChain(ParanoiaAgent):
 
     def set_shift(self, shift):
         self.flush()
+
+        if not 0 <= shift < 8:
+            raise BlockError('shift must be 0 <= shift < 8')
         
         old_span = self.blockspan()
         
@@ -278,6 +274,9 @@ class BlockChain(ParanoiaAgent):
 
             self[int(i/8)][i%8] = bit_data[i]
 
+        if not self.buffer:
+            self.flush()
+
     def parse_link_data(self, link_data):
         if isinstance(link_data, str):
             link_data = map(ord, link_data)
@@ -287,6 +286,9 @@ class BlockChain(ParanoiaAgent):
                 break
             
             self[i].set_value(link_data[i])
+
+        if not self.buffer:
+            self.flush()
 
     def parse_block_data(self, block_data):
         if isinstance(block_data, str):
@@ -299,6 +301,9 @@ class BlockChain(ParanoiaAgent):
                 break
             
             blocks[i].set_value(block_data[i])
+
+        if not self.buffer:
+            self.flush()
 
     def parse_memory(self):
         block_bytes = list()
@@ -331,6 +336,117 @@ class BlockChain(ParanoiaAgent):
     def flush(self):
         if not self.address is None:
             self.address.flush(size=self.blockspan())
+
+    def read_bits(self, bit_offset=0, size=None, force=False):
+        if not size is None and not isinstance(size, (int, Size)):
+            raise BlockError('size must be an int or a Size object')
+
+        if not size is None:
+            stop = bit_offset + int(size)
+        else:
+            stop = int(self.size)
+
+        if stop > int(self.size):
+            raise BlockError('size exceeds chain length')
+
+        bits = list()
+        
+        for i in range(bit_offset, stop):
+            bits.append(self[int(i/8)].get_bit(i%8, force))
+
+        return bits
+
+    def read_bytes(self, offset=0, size=None, force=False):
+        if not size is None and not isinstance(size, (int, Size)):
+            raise BlockError('size must be an int or a Size object')
+
+        if not size is None:
+            if isinstance(size, int):
+                stop = offset + int(size)
+            else:
+                stop = offset + size.byte_length()
+        else:
+            stop = self.size.byte_length()
+
+        if stop > self.size.byte_length():
+            raise BlockError('size exceeds chain length')
+
+        byte_vals = list()
+
+        for i in range(offset, stop):
+            byte_vals.append(self[i].get_value(force))
+
+        return byte_vals
+
+    def read_bytestring(self, offset=0, size=None, force=False):
+        return bytearray(self.read_bytes(offset, size, force))
+
+    def read_string(self, offset=0, size=None, encoding='ascii', force=False):
+        return self.read_bytestring(offset, size, force).decode(encoding)
+
+    def read_blocks(self, offset=0, size=None, force=False):
+        if not size is None and not isinstance(size, (int, Size)):
+            raise BlockError('size must be an int or a Size object')
+
+        if not size is None:
+            if isinstance(size, int):
+                stop = offset + int(size)
+            else:
+                stop = offset + size.byte_length()
+        else:
+            stop = self.blockspan()
+
+        if stop > self.blockspan():
+            raise BlockError('size exceeds blockspan')
+
+        block_vals = list()
+
+        for i in range(offset, stop):
+            block_vals.append(self.address.get_block(i).get_value(force))
+
+        return block_vals
+
+    def write_bits(self, bit_list, bit_offset=0, force=False):
+        bits = len(bit_list)
+
+        if bit_offset+bits > int(self.size):
+            raise BlockError('bitlist exceeds region size')
+
+        for i in range(bit_offset, bits+bit_offset):
+            self[int(i/8)].set_bit(i%8, bits[i-bit_offset], force)
+
+        if not self.buffer and not force:
+            self.flush()
+
+    def write_bytes(self, byte_list, offset=0, force=False):
+        bytecount = len(byte_list)
+
+        if offset+bytecount > self.size.byte_length():
+            raise BlockError('bytelist exceeds region size')
+
+        for i in range(offset, offset+bytecount):
+            self[i].set_value(byte_list[i], force)
+
+        if not self.buffer and not force:
+            self.flush()
+
+    def write_bytestring(self, byte_array, offset=0, force=False):
+        self.write_bytes(list(byte_array), offset, force)
+
+    def write_string(self, str_val, encoding='ascii', offset=0, force=False):
+        self.write_bytestring(bytearray(str_val, encoding), offset, force)
+
+    def write_blocks(self, block_list, offset=0, force=False):
+        block_count = len(block_list)
+
+        if offset+block_count > self.blockspan():
+            raise BlockError('blocklist exceeds region blockspan')
+
+        for i in range(offset, offset+block_count):
+            self.address.get_block(i).set_value(block_list[i], force)
+
+        if not self.buffer and not force:
+            self.flush()
 
     def __getitem__(self, index):
         if index < 0:

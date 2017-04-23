@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
-from paranoia.meta import array
+from paranoia.base.size import Size
+from paranoia.meta.region import NumericRegion
+from paranoia.meta.array import Array
 
 __all__ = ['Qword', 'QwordArray']
 
-class Qword(numeric_region.NumericRegion):
-    BITSPAN = 64
+class Qword(NumericRegion):
+    SIZE = Size(bytes=8)
 
-class QwordArray(array.Array):
+class QwordArray(Array):
     BASE_DECLARATION = Qword

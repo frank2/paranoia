@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
+from paranoia.meta.region import NumericRegion
 
 __all__ = ['Bitfield']
 
-class Bitfield(numeric_region.NumericRegion):
-    ALIGNMENT = numeric_region.NumericRegion.ALIGN_BIT
+class Bitfield(NumericRegion):
+    ALIGNMENT = NumericRegion.ALIGN_BIT
+    ENDIANNESS = NumericRegion.BIG_ENDIAN

@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
-from paranoia.meta import array
+from paranoia.base.size import Size
+from paranoia.meta.region import NumericRegion
+from paranoia.meta.array import Array
 
 __all__ = ['Dword', 'DwordArray']
 
-class Dword(numeric_region.NumericRegion):
-    BITSPAN = 32
+class Dword(NumericRegion):
+    SIZE = Size(bytes=4)
 
-class DwordArray(array.Array):
+class DwordArray(Array):
     BASE_DECLARATION = Dword

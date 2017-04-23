@@ -42,20 +42,24 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
     def size(self, **kwargs):
         dict_merge(kwargs, self.args)
+
+        size = self.get_arg('size')
         
-        if not 'size' in kwargs:
+        if size is None:
             return self.base_class.static_size(**kwargs)
 
-        return self.args['size']
+        return size
 
     def alignment(self):
-        if 'alignment' not in self.args:
+        alignment = self.get_arg('alignment')
+        
+        if alignment is None:
             return self.base_class.static_alignment()
 
-        return self.args['alignment']
+        return alignment
 
     def get_arg(self, arg):
-        if arg not in self.args:
+        if not arg in self.args:
             return getattr(self.base_class, arg.upper(), None)
 
         return self.args[arg]

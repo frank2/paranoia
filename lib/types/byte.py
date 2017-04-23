@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
-from paranoia.meta import array
+from paranoia.base.size import Size
+from paranoia.meta.region import NumericRegion
+from paranoia.meta.array import Array
 
 __all__ = ['Byte', 'ByteArray']
 
-class Byte(numeric_region.NumericRegion):
-    BITSPAN = 8
+class Byte(NumericRegion):
+    SIZE = Size(bytes=1)
 
-class ByteArray(array.Array):
+class ByteArray(Array):
     BASE_DECLARATION = Byte
 
     def __str__(self):

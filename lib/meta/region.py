@@ -31,7 +31,7 @@ def is_region(obj):
 class Region(BlockChain):
     DECLARATION = None
     PARENT_REGION = None
-    ALIGNMENT = None
+    ALIGNMENT = 8
     VALUE = None
     BIND = False
     OVERLAPS = False
@@ -40,7 +40,7 @@ class Region(BlockChain):
     VOLATILE = False
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
-    ALIGN_BLOCK = None
+    ALIGN_BLOCK = 0
 
     def __init__(self, **kwargs):
         from paranoia.meta.declaration import Declaration
@@ -49,7 +49,6 @@ class Region(BlockChain):
 
         if is_region(self.declaration):
             self.declaration = self.declaration.declare(**kwargs)
-            self.declaration.instance = self
         elif self.declaration is None:
             self.declaration = Declaration(base_class=self.__class__, args=kwargs)
 
@@ -57,6 +56,8 @@ class Region(BlockChain):
             raise RegionError('declaration must be a Declaration object')
         elif not issubclass(self.declaration.base_class, self.__class__):
             raise RegionError('declaration base_class mismatch')
+
+        self.declaration.instance = self
 
         self.init_finished = False
 
@@ -69,7 +70,7 @@ class Region(BlockChain):
         self.size = kwargs.setdefault('size', self.SIZE)
 
         if self.size is None:
-            self.size = self.__class__.static_size(**kwargs)
+            self.size = self.static_size(**kwargs)
             kwargs['size'] = self.size
 
         self.subregions = dict()
@@ -84,10 +85,17 @@ class Region(BlockChain):
 
         self.init_finished = True
 
-    def set_value(self, value):
+    def set_size(self, new_size):
+        if not self.parent_region is None: # subregion
+            self.parent_region.resize_subregion(self.declaration, new_size)
+            return
+
+        super(Region, self).set_size(new_size)
+
+    def set_value(self, value, force=False):
         raise RegionError('set_value not implemented')
 
-    def get_value(self):
+    def get_value(self, force=False):
         raise RegionError('get_value not implemented')
 
     def is_bound(self):
@@ -98,7 +106,7 @@ class Region(BlockChain):
             raise MemoryRegionError('new memory base must be an Address object')
 
         self.address = new_base
-        self.shift = new_shift
+        self.set_shift(new_shift)
 
         regions = self.subregion_offsets.items()
         regions.sort(lambda x,y: cmp(x[1], y[1]))
@@ -187,7 +195,7 @@ class Region(BlockChain):
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
 
-        if bit_offset+int(decl.size()) > self.shifted_size():
+        if bit_offset+int(decl.size()) > int(self.size):
             try:
                 self.accomodate_subregion(decl, decl.size())
             except Exception as e:
@@ -213,7 +221,7 @@ class Region(BlockChain):
         if not self.has_subregion(decl):
             raise RegionError('no subregion found')
         
-        if not decl.instance is None and decl.instance.zero_memory:
+        if not decl.instance is None:
             decl.instance.write_bits([0] * decl.bitspan())
 
         del self.subregion_offsets[id(decl)]
@@ -246,29 +254,35 @@ class Region(BlockChain):
         # called when a subregion wants to resize. this handles e.g. reallocating the memory region
         # if it has been allocated
         if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+            raise RegionError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
-            raise MemoryRegionError('subregion not found')
+            raise RegionError('subregion not found')
+
+        if not isinstance(new_size, Size):
+            raise RegionError('size must be a Size instance')
 
         current_offset = self.subregion_offsets[id(decl)]
 
         if self.in_subregion(current_offset, new_size, True):
             raise MemoryRegionError('accomodation overwrites another region')
 
-        new_size = current_offset + new_size
+        new_size = current_offset + int(new_size)
 
-        if new_size <= self.bitspan and not self.shrink:
+        if new_size <= int(self.size) and not self.shrink:
             return
 
-        self.resize(new_size)
+        self.set_size(Size(bits=new_size))
 
     def resize_subregion(self, decl, new_size):
         if not isinstance(decl, declaration.Declaration):
-            raise MemoryRegionError('decl must be a Declaration object')
+            raise RegionError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
-            raise MemoryRegionError('subregion not found')
+            raise RegionError('subregion not found')
+
+        if not isinstance(new_size, Size):
+            raise RegionError('size must be a Size object')
         
         self.accomodate_subregion(decl, new_size)
 
@@ -276,17 +290,19 @@ class Region(BlockChain):
 
         self.remove_subregion(decl)
 
-        old_size = decl.get_arg('bitspan')
-        decl.set_arg('bitspan', new_size)
+        old_size = decl.size()
+        decl.set_arg('size', new_size)
 
         try:
             self.declare_subregion(decl, current_offset)
         except Exception as e:
-            decl.set_arg('bitspan', old_size)
+            decl.set_arg('size', old_size)
             raise e
 
         if not decl.instance is None:
-            decl.instance.bitspan = new_size
+            # explicitly call the BlockChain version of this function to prevent
+            # an infinite loop
+            BlockChain.set_size(decl.instance, new_size)
         
     def bit_offset_subregions(self, bit_offset):
         current_offsets = self.subregion_offsets.items()
@@ -301,27 +317,29 @@ class Region(BlockChain):
             subregion = self.subregions[ident]
             ident_offset = self.subregion_offsets[ident]
 
-            if bit_offset >= ident_offset and bit_offset < ident_offset+subregion.bitspan():
+            if bit_offset >= ident_offset and bit_offset < ident_offset+int(subregion.size()):
                 results.append(ident)
 
         if len(results):
             return map(lambda x: self.subregions[x], results)
 
     def bit_offset_to_base(self, bit_offset, alignment):
-        aligned = align(self.bitshift + bit_offset, alignment)
+        if alignment == Region.ALIGN_BLOCK:
+            aligned = align(self.shift + bit_offset, 8)
+        else:
+            aligned = self.shift + align(bit_offset, alignment)
+            
         bytecount = int(aligned/8) # python3 makes a float
 
-        return self.memory_base.fork(bytecount)
+        return self.address.fork(bytecount)
 
     def bit_offset_to_shift(self, bit_offset, alignment):
-        fixed_offset = self.bitshift + bit_offset
-        
-        if alignment == MemoryRegion.ALIGN_BIT:
-            return fixed_offset % 8
-        elif alignment == MemoryRegion.ALIGN_BYTE:
-            return 0
+        if alignment == Region.ALIGN_BLOCK:
+            aligned = align(self.shift + bit_offset, 8)
         else:
-            return align(fixed_offset, alignment) % 8
+            aligned = self.shift + align(bit_offset, alignment)
+
+        return aligned % 8
 
 class NumericRegion(Region):
     ENDIANNESS = 0
@@ -344,10 +362,11 @@ class NumericRegion(Region):
 
         super(NumericRegion, self).__init__(**kwargs)
 
-    def set_value(self, value):
+    def set_value(self, value, force=False):
         value_bits = list()
 
         if value < 0:
+            # convert the negative number into two's compliment
             mask = 2 ** int(self.size) - 1
             value = (value & mask) - 1
 
@@ -363,9 +382,12 @@ class NumericRegion(Region):
             links.reverse()
 
         for i in xrange(int(self.size)):
-            links[int(i/8)][i%8] = value_bits[i]
+            links[int(i/8)].set_bit(i % 8, value_bits[i], force)
 
-    def get_value(self):
+        if force or not self.buffer:
+            self.flush()
+
+    def get_value(self, force=False):
         value = 0
 
         links = list(self.link_iterator())
@@ -377,10 +399,10 @@ class NumericRegion(Region):
         
         for i in xrange(int(self.size)):
             if i == 0 and self.signage:
-                signed_bit = links[int(i/8)][i%8]
+                signed_bit = links[int(i/8)].get_bit(i%8, force)
             
             value <<= 1
-            value |= links[int(i/8)][i%8]
+            value |= links[int(i/8)].get_bit(i%8, force)
 
         if signed_bit == 1:
             mask = 2 ** int(self.size) - 1
