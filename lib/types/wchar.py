@@ -5,16 +5,16 @@ try:
 except ImportError: # python3
     import builtins as __builtin__
 
-from paranoia.base import numeric_region
-from paranoia.meta import array
-from paranoia.types import word
+from paranoia.meta.array import Array
+from paranoia.meta.region import NumericRegion, RegionError
+from paranoia.types.word import Word
 
 __all__ = ['WcharError', 'Wchar', 'WcharArray']
 
-class WcharError(numeric_region.NumericRegionError):
+class WcharError(RegionError):
     pass
 
-class Wchar(word.Word):
+class Wchar(Word):
     def get_char_value(self):
         return unichr(self.get_value()).encode('utf-16be').decode('utf-16be')
 
@@ -35,5 +35,5 @@ class Wchar(word.Word):
 
         self.set_value(ord(wchar))
 
-class WcharArray(array.Array):
+class WcharArray(Array):
     BASE_DECLARATION = Wchar

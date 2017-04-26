@@ -3,9 +3,12 @@
 import copy
 import inspect
 
-from paranoia.base import declaration, memory_region, paranoia_agent, parser
+from paranoia.fundamentals import *
+from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.size import Size
+from paranoia.meta.declaration import Declaration, ensure_declaration
+from paranoia.meta.region import Region, RegionError
 from paranoia.meta.size_hint import SizeHint
-from paranoia.converters import *
 
 try:
     import __builtin__
@@ -17,64 +20,11 @@ __all__ = ['is_size_hint', 'ListError', 'List']
 def is_size_hint(decl):
     return issubclass(decl.base_class, SizeHint)
 
-class ListError(paranoia_agent.ParanoiaError):
+class ListError(ParanoiaError):
     pass
 
-class ListParser(memory_region.MemoryRegionParser):
-    def generate(self):
-        decl = self.declaration
-        decl_gen = decl.instance.map_declarations()
-        data = decl.get_arg('data')
-        bitshift = decl.get_arg('bitshift')
-        bitspan = decl.bitspan()
-        bits_read = 0
-        last_bits = 0
-
-        tape = bytelist_to_bitlist(map(ord, data))
-
-        if bitshift > 0:
-            tape = tape[bitshift:]
-
-        yield tape
-
-        for subdecl in decl_gen:
-            align_delta = (align(bitshift + bits_read, subdecl.alignment()) - bitshift) - bits_read
-            tape = tape[align_delta:]
-            bits_read += align_delta
-            last_bits += align_delta
-            
-            subparser = subdecl.parser()
-
-            while not subparser.state == parser.Parser.STATE_DONE:
-                prior_span = subdecl.bitspan()
-                
-                consumed = subparser.consume()
-                tape = subparser.last_state.unconsumed
-                bits_read += subparser.last_state.read
-                last_bits += subparser.last_state.read
-
-                new_span = subdecl.bitspan()
-
-                if not new_span - prior_span == 0 and not decl.instance is None:
-                    # declaration resized in the middle of parsing, resize the list
-                    # to accomodate
-                    decl.instance.resize(List.declarative_size(decl.get_arg('overlaps'), decl.get_arg('declarations')))
-                    
-                if subparser.state == parser.STATE_DONE:
-                    break
-
-                if not len(tape) > 0:
-                    yield parser.ParserState(tape, last_bits, subparser.last_state.want)
-                    tape = yield
-                    last_bits = 0
-                    
-                subparser.feed(tape)
-
-            yield parser.ParserState(tape, bits_read, 0)
-
-class List(memory_region.MemoryRegion):
+class List(Region):
     SHRINK = True
-    PARSER_CLASS = ListParser
     DECLARATIONS = None
 
     def __init__(self, **kwargs):
@@ -94,11 +44,11 @@ class List(memory_region.MemoryRegion):
         if not isinstance(self.declarations, list):
             raise ListError('declarations must be a list of Declaration objects')
 
-        self.declarations = map(memory_region.ensure_declaration, self.declarations)
+        self.declarations = map(ensure_declaration, self.declarations)
         
-        kwargs.setdefault('bitspan', List.declarative_size(self.overlaps, self.declarations))
+        kwargs.setdefault('size', self.static_size(overlaps=self.overlaps, declarations=self.declarations))
 
-        memory_region.MemoryRegion.__init__(self, **kwargs)
+        super(List, self).__init__(**kwargs)
 
         self.init_finished = False
 
@@ -108,12 +58,22 @@ class List(memory_region.MemoryRegion):
                 continue
 
         self.init_finished = True
+
+    def parse_bit_data(self, bit_data):
+        mapper = self.map_declarations()
+
+        for decl in mapper:
+            offset = self.subregion_offsets[id(decl)]
+            parsed = decl.bit_parser(bit_data=bit_data[offset:])
+
+            if not parsed == decl.size():
+                self.resize_subregion(decl, parsed)
+
+            self.write_bits(bit_data[offset:offset+parsed], offset)
         
     def map_declarations(self):
         if self.mapped:
             raise ListError('list has already been mapped')
-
-        hints = filter(lambda x: is_size_hint(self.declarations[x]), range(len(self.declarations)))
 
         for i in xrange(len(self.declarations)):
             decl = self.declarations[i]
@@ -123,9 +83,11 @@ class List(memory_region.MemoryRegion):
                 
             yield decl
 
-            if i in hints:
+            if decl.volatile():
+                self.instantiate(i)
+                
+            if decl.is_size_hint():
                 self[i].resolve()
-                self.resize(List.declarative_size(self.overlaps, self.declarations))
 
         self.mapped = True
 
@@ -155,7 +117,7 @@ class List(memory_region.MemoryRegion):
         return deltas
 
     def accomodate_subregion(self, decl, new_size):
-        if not isinstance(decl, declaration.Declaration):
+        if not isinstance(decl, Declaration):
             raise memory_region.MemoryRegionError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
@@ -171,7 +133,7 @@ class List(memory_region.MemoryRegion):
         if size_delta > 0:
             old_size = decl.get_arg('bitspan')
             decl.set_arg('bitspan', new_size)
-            new_size = List.declarative_size(self.overlaps, self.declarations)
+            new_size = self.__class__.declarative_size(self.overlaps, self.declarations)
 
             # region must be resized first to accomodate new_size, then other regions
             # can be moved
@@ -193,15 +155,18 @@ class List(memory_region.MemoryRegion):
         # resize is called on the list object
 
     def resize_subregion(self, decl, new_size):
-        if not isinstance(decl, declaration.Declaration):
-            raise memory_region.MemoryRegionError('decl must be a Declaration object')
+        if not isinstance(decl, Declaration):
+            raise RegionError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
-            raise memory_region.MemoryRegionError('subregion not found')
+            raise RegionError('subregion not found')
+
+        if not isinstance(new_size, Size):
+            raise RegionError('new_size must be a Size object')
 
         current_offset = self.subregion_offsets[id(decl)]
         current_index = self.declaration_index[id(decl)]
-        size_delta = new_size - decl.bitspan()
+        size_delta = new_size - decl.size()
 
         if size_delta == 0:
             return
@@ -235,7 +200,7 @@ class List(memory_region.MemoryRegion):
             self.resize(new_list_size)
 
         if not decl.instance is None:
-            decl.instance.bitspan = new_size
+            decl.instance.size = new_size
 
     def insert_declaration(self, index, decl):
         if self.is_bound():
@@ -246,7 +211,7 @@ class List(memory_region.MemoryRegion):
         self.declarations.insert(index, decl)
 
         try:
-            self.resize(List.declarative_size(self.overlaps, self.declarations))
+            self.resize(self.static_size(declarations=self.declarations))
         except Exception,e:
             self.declarations.pop(index)
             raise e
@@ -299,7 +264,7 @@ class List(memory_region.MemoryRegion):
             for offset in targets:
                 self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
 
-        self.resize(List.declarative_size(self.overlaps, self.declarations))
+        self.resize(self.static_size(declarations=self.declarations))
 
     def append_declaration(self, decl):
         self.insert_declaration(len(self.declarations), decl)
@@ -332,32 +297,56 @@ class List(memory_region.MemoryRegion):
         for i in xrange(len(self)):
             yield self.instantiate(i)
 
-    @staticmethod
-    def declarative_size(overlap, declarations):
+    @classmethod
+    def static_size(cls, **kwargs):
         size = 0
         offset = 0
+        overlap = kwargs.setdefault('overlaps', cls.OVERLAPS)
+        shift = kwargs.setdefault('shift', cls.SHIFT)
+        declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
 
         for decl in declarations:
-            decl = memory_region.ensure_declaration(decl)
+            decl = ensure_declaration(decl)
             
             if overlap:
-                if decl.bitspan() > size:
-                    size = decl.bitspan()
+                if decl.size() > size:
+                    size = decl.size()
             else:
-                if not decl.bitspan() == 0:
-                    size = align(offset, decl.alignment()) + decl.bitspan()
+                if not decl.size() == 0:
+                    size = decl.align(offset, shift) + decl.size()
                     
                 offset = size
 
         return size
 
     @classmethod
-    def static_bitspan(cls, **kwargs):
+    def bit_parser(cls, **kwargs):
+        size = 0
+        overlap = kwargs.setdefault('overlaps', cls.OVERLAPS)
+        shift = kwargs.setdefault('shift', cls.SHIFT)
         declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
-        declarations = map(memory_region.ensure_declaration, declarations)
-        overlaps = kwargs.setdefault('overlaps', cls.OVERLAPS)
 
-        return cls.declarative_size(overlaps, declarations)
+        if 'block_data' in kwargs:
+            bit_data = bytelist_to_bitlist(kwargs['block_data'])[shift:]
+        elif 'byte_data' in kwargs:
+            bit_data = bytelist_to_bitlist(kwargs['byte_data'])
+        elif 'bit_data' in kwargs:
+            bit_data = kwargs['bit_data']
+        else:
+            bit_data = list()
+
+        for decl in declarations:
+            if overlap:
+                parsed = decl.bit_parser(bit_data=bit_data, shift=shift)
+
+                if parsed > size:
+                    size = parsed
+            else:
+                size = decl.align(size, shift)
+                parsed = decl.bit_parser(bit_data=bit_data[size:], shift=shift)
+                size += parsed
+
+        return size
 
     @classmethod
     def subclass(cls, **kwargs):

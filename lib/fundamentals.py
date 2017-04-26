@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
 import ctypes
+import math
 import platform
 import sys
 
 __all__ = ['aligned', 'alignment_delta', 'align', 'bitlist_to_bytelist', 'bytelist_to_bitlist'
            ,'bitlist_to_numeric', 'numeric_to_bitlist', 'dict_merge', 'string_address', 'string_offset'
            ,'malloc', 'realloc', 'free', 'memset', 'memmove', 'hexdump', 'bitdump'
-           ,'crt_module']
+           ,'crt_module', 'system', 'arch']
     
 # /!\ WARNING INCOMING HACK /!\
 key = 'ADNU'
@@ -16,6 +17,7 @@ string_offset = ctypes.string_at(id(key), 256).index(key)
 
 crt_module = None
 system = platform.system()
+arch = int(math.log(sys.maxsize, 2))+1
 
 if system == 'Windows':
     crt_module = ctypes.cdll.msvcrt

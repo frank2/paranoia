@@ -2,16 +2,16 @@
 
 import inspect
 
-from paranoia.base import declaration, memory_region
-from paranoia.meta import list as d_list
-from paranoia.converters import align
+from paranoia.fundamentals import align
+from paranoia.meta.declaration import Declaration, ensure_declaration
+from paranoia.meta.list import ListError, List
 
 __all__ = ['ArrayError', 'Array']
 
-class ArrayError(d_list.ListError):
+class ArrayError(ListError):
     pass
 
-class Array(d_list.List):
+class Array(List):
     BASE_DECLARATION = None
     ELEMENTS = 0
 
@@ -21,12 +21,12 @@ class Array(d_list.List):
         if self.base_declaration is None:
             raise ArrayError('base declaration cannot be None')
 
-        self.base_declaration = memory_region.ensure_declaration(self.base_declaration)
+        self.base_declaration = ensure_declaration(self.base_declaration)
         self.elements = kwargs.setdefault('elements', self.ELEMENTS)
 
         kwargs['declarations'] = [self.base_declaration.copy() for i in xrange(self.elements)]
 
-        d_list.List.__init__(self, **kwargs)
+        super(Array, self).__init__(**kwargs)
 
     def set_elements(self, elements):
         self.elements = elements

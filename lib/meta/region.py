@@ -8,7 +8,6 @@ from paranoia.base.address import Address
 from paranoia.base.allocator import heap, Allocator
 from paranoia.base.block import BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
-from paranoia.base import parser
 from paranoia.meta.declaration import Declaration
 from paranoia.fundamentals import *
 
@@ -17,10 +16,7 @@ try:
 except ImportError: #python3
     import builtins as __builtin__
 
-__all__ = ['MemoryRegionError', 'sizeof', 'MemoryRegion']
-
-class MemoryRegionError(ParanoiaError):
-    pass
+__all__ = ['RegionError', 'is_region', 'sizeof', 'Region', 'NumericRegion']
 
 class RegionError(ParanoiaError):
     pass
@@ -28,15 +24,23 @@ class RegionError(ParanoiaError):
 def is_region(obj):
     return inspect.isclass(obj) and issubclass(obj, Region)
 
+def sizeof(memory_region):
+    if is_region(memory_region):
+        return memory_region.static_size().byte_length()
+    elif isinstance(memory_region, Region):
+        return memory_region.size.byte_length()
+    elif isinstance(memory_region, Declaration):
+        return memory_region.size()
+    else:
+        raise RegionError('given argument must be a Declaration object or an instance or class deriving Region')
+    
 class Region(BlockChain):
     DECLARATION = None
     PARENT_REGION = None
     ALIGNMENT = 8
     VALUE = None
-    BIND = False
     OVERLAPS = False
     SHRINK = False
-    STATIC = False
     VOLATILE = False
     ALIGN_BIT = 1
     ALIGN_BYTE = 8
@@ -47,10 +51,10 @@ class Region(BlockChain):
 
         self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
 
-        if is_region(self.declaration):
-            self.declaration = self.declaration.declare(**kwargs)
-        elif self.declaration is None:
+        if self.declaration is None:
             self.declaration = Declaration(base_class=self.__class__, args=kwargs)
+        elif is_region(self.declaration):
+            self.declaration = self.declaration.declare(**kwargs)
 
         if not isinstance(self.declaration, Declaration):
             raise RegionError('declaration must be a Declaration object')
@@ -59,14 +63,10 @@ class Region(BlockChain):
 
         self.declaration.instance = self
 
-        self.init_finished = False
-
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
-        self.bind = kwargs.setdefault('bind', self.BIND)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
         self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
         self.shrink = kwargs.setdefault('shrink', self.SHRINK)
-        self.static = kwargs.setdefault('static', self.STATIC)
         self.size = kwargs.setdefault('size', self.SIZE)
 
         if self.size is None:
@@ -78,14 +78,60 @@ class Region(BlockChain):
         
         super(Region, self).__init__(**kwargs)
 
+        self.init_finished = False
+
         value = kwargs.setdefault('value', self.VALUE)
+        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
 
         if not value is None:
             self.set_value(value)
+        elif 'bit_data' in kwargs:
+            self.parse_bit_data(kwargs['bit_data'])
+        elif 'link_data' in kwargs:
+            self.parse_link_data(kwargs['link_data'])
+        elif 'block_data' in kwargs:
+            self.parse_block_data(kwargs['block_data'])
+        elif parse_memory:
+            self.parse_memory()
 
         self.init_finished = True
 
+    def parse_bit_data(self, bit_data):
+        parsed = self.declaration.bit_parser(bit_data=bit_data, shift=self.shift)
+
+        if parsed >= self.size:
+            self.set_size(parsed)
+
+        self.write_bits(bit_data[:parsed])
+
+    def parse_link_data(self, link_data):
+        if isinstance(link_data, str):
+            link_data = map(ord, link_data)
+
+        bit_list = bytelist_to_bitlist(link_data)
+
+        return self.parse_bit_data(bit_list)
+
+    def parse_block_data(self, block_data):
+        if isinstance(block_data, str):
+            block_data = map(ord, block_data)
+
+        block_bits = bytelist_to_bitlist(block_data)
+
+        return self.parse_bit_data(block_bits[self.shift:])
+
+    def parse_memory(self):
+        block_bytes = list()
+
+        for block in self.block_iterator():
+            block_bytes.append(block.get_value(force=True))
+
+        self.parse_block_data(block_bytes)
+
     def set_size(self, new_size):
+        if self.is_bound():
+            raise RegionError('cannot resize bound region')
+        
         if not self.parent_region is None: # subregion
             self.parent_region.resize_subregion(self.declaration, new_size)
             return
@@ -98,12 +144,9 @@ class Region(BlockChain):
     def get_value(self, force=False):
         raise RegionError('get_value not implemented')
 
-    def is_bound(self):
-        return self.bind and self.init_finished
-
     def rebase(self, new_base, new_shift):
         if not isinstance(new_base, Address):
-            raise MemoryRegionError('new memory base must be an Address object')
+            raise RegionError('new memory base must be an Address object')
 
         self.address = new_base
         self.set_shift(new_shift)
@@ -341,6 +384,70 @@ class Region(BlockChain):
 
         return aligned % 8
 
+    def read_memory(self):
+        return map(int, self.block_iterator())
+
+    @classmethod
+    def static_size(cls, **kwargs):
+        return cls.SIZE
+
+    @classmethod
+    def static_alignment(cls):
+        return cls.ALIGNMENT
+    
+    @classmethod
+    def declare(cls, **kwargs):
+        return Declaration(base_class=cls, args=kwargs)
+
+    @classmethod
+    def bit_parser(cls, **kwargs):
+        return kwargs.setdefault('size', cls.SIZE)
+
+    @classmethod
+    def subclass(cls, **kwargs):
+        kwargs.setdefault('declaration', cls.DECLARATION)
+        kwargs.setdefault('parent_region', cls.PARENT_REGION)
+        kwargs.setdefault('alignment', cls.ALIGNMENT)
+        kwargs.setdefault('value', cls.VALUE)
+        kwargs.setdefault('overlaps', cls.OVERLAPS)
+        kwargs.setdefault('shrink', cls.SHRINK)
+        kwargs.setdefault('volatile', cls.VOLATILE)
+
+        # since BlockChain doesn't support this function, include
+        # the arguments it would have
+        kwargs.setdefault('address', cls.ADDRESS)
+        kwargs.setdefault('allocator', cls.ALLOCATOR)
+        kwargs.setdefault('auto_allocate', cls.AUTO_ALLOCATE)
+        kwargs.setdefault('shift', cls.SHIFT)
+        kwargs.setdefault('buffer', cls.BUFFER)
+        kwargs.setdefault('bind', cls.BIND)
+        kwargs.setdefault('static', cls.STATIC)
+        kwargs.setdefault('maximum_size', cls.MAXIMUM_SIZE)
+        kwargs.setdefault('parse_memory', cls.PARSE_MEMORY)
+
+        class SubclassedRegion(cls):
+            # Region args
+            DECLARATION = kwargs['declaration']
+            PARENT_REGION = kwargs['parent_region']
+            ALIGNMENT = kwargs['alignment']
+            VALUE = kwargs['value']
+            OVERLAPS = kwargs['overlaps']
+            SHRINK = kwargs['shrink']
+            VOLATILE = kwargs['volatile']
+
+            # BlockChain args
+            ADDRESS = kwargs['address']
+            ALLOCATOR = kwargs['allocator']
+            AUTO_ALLOCATE = kwargs['auto_allocate']
+            SHIFT = kwargs['shift']
+            BUFFER = kwargs['buffer']
+            BIND = kwargs['bind']
+            STATIC = kwargs['static']
+            MAXIMUM_SIZE = kwargs['maximum_size']
+            PARSE_MEMORY = kwargs['parse_memory']
+
+        return SubclassedRegion
+
 class NumericRegion(Region):
     ENDIANNESS = 0
     SIGNAGE = 0
@@ -363,13 +470,25 @@ class NumericRegion(Region):
         super(NumericRegion, self).__init__(**kwargs)
 
     def set_value(self, value, force=False):
-        value_bits = list()
+        int_max = 2 ** int(self.size)
+
+        if abs(value) >= int_max:
+            raise RegionError('integer overflow')
 
         if value < 0:
             # convert the negative number into two's compliment
-            mask = 2 ** int(self.size) - 1
-            value = (value & mask) - 1
+            value += int_max
 
+            if value < 0:
+                raise RegionError('negative overflow')
+
+        if value >= int_max:
+            raise RegionError('integer overflow')
+
+        self.declaration.set_arg('value', value)
+        
+        value_bits = list()
+            
         for i in xrange(int(self.size)):
             value_bits.append(value & 1)
             value >>= 1
@@ -384,7 +503,7 @@ class NumericRegion(Region):
         for i in xrange(int(self.size)):
             links[int(i/8)].set_bit(i % 8, value_bits[i], force)
 
-        if force or not self.buffer:
+        if not force and not self.buffer:
             self.flush()
 
     def get_value(self, force=False):
@@ -398,566 +517,16 @@ class NumericRegion(Region):
         signed_bit = 0
         
         for i in xrange(int(self.size)):
+            bit = links[int(i/8)].get_bit(i%8, force)
+            
             if i == 0 and self.signage:
-                signed_bit = links[int(i/8)].get_bit(i%8, force)
+                signed_bit = bit
             
             value <<= 1
-            value |= links[int(i/8)].get_bit(i%8, force)
+            value |= bit
 
         if signed_bit == 1:
-            mask = 2 ** int(self.size) - 1
-            value ^= mask
-            value += 1
-            value *= -1
+            int_max = 2 ** int(self.size)
+            value -= int_max
 
         return value
-        
-def sizeof(memory_region):
-    if issubclass(memory_region, MemoryRegion):
-        return memory_region.static_bytespan()
-    elif isinstance(memory_region, MemoryRegion):
-        return memory_region.bytespan()
-    else:
-        raise MemoryRegionError('given argument must be an instance or class deriving MemoryRegion')
-
-def is_region_class(obj):
-    return inspect.isclass(obj) and issubclass(obj, MemoryRegion)
-
-def ensure_declaration(obj):
-    if isinstance(obj, declaration.Declaration):
-        return obj
-    elif is_region_class(obj):
-        return obj.declare()
-    else:
-        raise MemoryRegionError('declaration must be either a Declaration object or a MemoryRegion class')
-
-class MemoryRegionParser(parser.Parser):
-    def __init__(self, decl):
-        parser.Parser.__init__(self, decl)
-        self.bits_consumed = 0
-        
-    def consume(self):
-        decl = self.declaration
-        consumed = super(MemoryRegionParser, self).consume()
-
-        if not decl.instance is None:
-            decl.instance.write_bits(consumed, self.bits_consumed)
-            
-        self.bits_consumed += len(consumed)
-
-        return consumed
-
-    def feed(self, data=None):
-        if not self.state == parser.Parser.STATE_FEED:
-            raise parser.ParserError('parser not ready for feeding')
-
-        if data is None:
-            if len(self.tape):
-                data = self.tape
-            elif self.declaration.get_arg('parse_memory'):
-                data = self.read_bits(self.last_state.want, self.bits_consumed)
-            else:
-                raise ParseError('unexpected end of file')
-
-        self.gen_obj.send(data)
-        self.state = parser.Parser.STATE_CONSUME
-        
-    def generate(self):
-        decl = self.declaration
-        data = decl.get_arg('data')
-        bitshift = decl.get_arg('bitshift')
-        bitspan = decl.bitspan()
-
-        tape = bytelist_to_bitlist(map(ord, data))
-
-        if bitshift > 0:
-            tape = tape[bitshift:]
-
-        yield tape
-
-        consumed = tape[:bitspan]
-        total_read = len(consumed)
-        bitspan -= total_read
-        unconsumed = tape[total_read:]
-
-        while bitspan > 0:
-            yield parser.ParserState(unconsumed, total_read, bitspan)
-            tape = yield
-                
-            consumed = tape[:bitspan]
-            total_read = len(consumed)
-            bitspan -= total_read
-            unconsumed = tape[total_read:]
-
-        yield parser.ParserState(unconsumed, total_read, 0)
-    
-class MemoryRegion(ParanoiaAgent):
-    DECLARATION = None
-    BITSPAN = None
-    MEMORY_BASE = None
-    AUTO_ALLOCATE = True
-    ALLOCATION = None
-    PARENT_REGION = None
-    ALLOCATOR_CLASS = Allocator
-    ALLOCATOR = heap
-    PARSER_CLASS = MemoryRegionParser
-    DATA = None
-    VALUE = None
-    ZERO_MEMORY = False
-    BIND = False
-    OVERLAPS = False
-    PARSE_MEMORY = False
-    STATIC = False
-    SHRINK = False
-    MAXIMUM_SIZE = 0
-    BITSHIFT = 0
-    ALIGNMENT = 8
-    ALIGN_BIT = 1
-    ALIGN_BYTE = 8
-
-    def __init__(self, **kwargs):
-        paranoia_agent.ParanoiaAgent.__init__(self)
-
-        # declaration must come first to properly attribute values
-        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
-
-        if not self.declaration is None:
-            self.declaration = ensure_declaration(self.declaration)
-        else:
-            self.declaration = declaration.Declaration(base_class=self.__class__, args=kwargs)
-            
-        self.declaration.instance = self
-
-        kwargs['declaration'] = self.declaration
-
-        if not issubclass(self.declaration.base_class, self.__class__):
-            raise MemoryRegionError('declaration base_class mismatch')
-
-        self.allocator_class = kwargs.setdefault('allocator_class', self.ALLOCATOR_CLASS)
-        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
-        self.allocation = kwargs.setdefault('allocation', self.ALLOCATION)
-        self.parser_class = kwargs.setdefault('parser_class', self.PARSER_CLASS)
-        self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
-        self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
-        self.parent_region = kwargs.setdefault('parent_region', self.PARENT_REGION)
-        self.bitspan = kwargs.setdefault('bitspan', self.BITSPAN)
-        self.bitshift = kwargs.setdefault('bitshift', self.BITSHIFT)
-        self.memory_base = kwargs.setdefault('memory_base', self.MEMORY_BASE)
-        self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
-        self.bind = kwargs.setdefault('bind', self.BIND)
-        self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
-        self.maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
-        self.shrink = kwargs.setdefault('shrink', self.SHRINK)
-        self.static = False # change this at the end of the constructor
-        self.subregions = dict()
-        self.subregion_offsets = dict()
-        self.init_finished = False
-        
-        data = kwargs.setdefault('data', self.DATA)
-        value = kwargs.setdefault('value', self.VALUE)
-        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
-        parser = None
-
-        if not data is None and not isinstance(data, str):
-            raise MemoryRegionError('data must be a string')
-
-        if not self.allocation is None and not isinstance(self.allocation, allocator.Allocation):
-            raise MemoryRegionError('allocation must implement allocator.Allocation')
-
-        if not issubclass(self.allocator_class, allocator.Allocator):
-            raise MemoryRegionError('allocator class must implement allocator.Allocator')
-        if self.alignment is None or self.alignment < 0:
-            raise MemoryRegionError('alignment cannot be None or less than 0')
-
-        if self.bitspan is None:
-            raise MemoryRegionError('bitspan cannot be None')
-
-        if self.bitshift > 8 or self.bitshift < 0:
-            raise MemoryRegionError('bitshift must be within the range of 0 <= x < 8')
-
-        if not self.parent_region is None and not isinstance(self.parent_region, MemoryRegion):
-            raise MemoryRegionError('parent_region must implement MemoryRegion')
-
-        if self.allocator is None:
-            self.allocator = self.allocator_class(**kwargs)
-        elif not isinstance(self.allocator, allocator.Allocator):
-            raise MemoryRegionError('allocator must implement allocator.Allocator')
-
-        if self.memory_base is None:
-            if self.auto_allocate:
-                self.allocate()
-            elif self.allocation:
-                self.memory_base = self.allocation.address_object()
-            else:
-                raise MemoryRegionError('memory_base cannot be None when auto_allocate is False and allocation is None')
-
-        if not self.memory_base is None and not isinstance(self.memory_base, allocator.Address):
-            raise MemoryRegionError('memory_base must be an Address object')
-
-        if not parse_memory and self.zero_memory and not self.bitspan == 0:
-            self.write_bits([0] * self.bitspan)
-
-        if parse_memory or not data is None:
-            parser = self.declaration.parser()
-        elif not value is None:
-            self.set_value(value)
-
-        if not parser is None:
-            parser.run()
-
-        self.static = kwargs.setdefault('static', self.STATIC)
-        self.init_finished = True
-
-    def bytespan(self):
-        aligned = align(self.bitshift+self.bitspan, self.alignment)
-        bytecount = int(aligned/8)
-        extra = int(not aligned % 8 == 0)
-        
-        return bytecount + extra
-
-    def shifted_bitspan(self):
-        return self.bitspan + self.bitshift
-
-    def shifted_bytespan(self):
-        aligned = align(self.shifted_bitspan(), self.alignment)
-        bytecount = int(aligned/8) # python3 turns this into a float
-        extra = int(aligned % 8 != 0)
-        
-        return bytecount + extra
-
-    def read_bytestring(self, byte_length, byte_offset=0):
-        if (byte_length+byte_offset)*8 > align(self.bitspan+self.bitshift, 8): 
-            raise MemoryRegionError('byte length and offset exceed aligned bitspan (%d, %d, %d)' % (byte_length, byte_offset, align(self.bitspan+self.bitshift, 8)))
-
-        if self.allocation:
-            return self.allocation.read_bytestring(byte_length, byte_offset)
-        else:
-            string_at = ctypes.string_at(int(self.memory_base)+byte_offset, byte_length)
-
-            if isinstance(string_at, str): # python 2
-                string_at = bytearray(string_at)
-
-            return string_at
-
-    def read_string(self, byte_length, byte_offset=0, encoding='ascii'):
-        self.read_bytestring(byte_length, byte_offset).decode(encoding)
-    
-    def read_bytes(self, byte_length, byte_offset=0):
-        return list(self.read_bytestring(byte_length, byte_offset))
-
-    def read_bytelist_for_bits(self, bit_length, bit_offset=0, hinting=True):
-        if bit_length + bit_offset > self.bitspan:
-            raise MemoryRegionError('bit length and offset exceed bitspan')
-
-        # true_offset represents where in the first byte to start reading bits
-        if hinting:
-            true_offset = self.bitshift + bit_offset
-        else:
-            true_offset = bit_offset
-
-        # get the number of bytes necessary to grab our contextual bits
-        byte_length = int(align(bit_length+(true_offset % 8), 8)/8)
-
-        # convert the bytes into a string of bits
-        return self.read_bytes(byte_length, int(true_offset/8))
-
-    def read_bitlist_from_bytes(self, bit_length, bit_offset=0, hinting=True):
-        if bit_length + bit_offset > self.bitspan:
-            raise MemoryRegionError('bit length and offset exceed bitspan')
-
-        unconverted_bytes = self.read_bytelist_for_bits(bit_length, bit_offset, hinting)
-        
-        return ''.join(map('{0:08b}'.format, unconverted_bytes))
-
-    def read_bits_from_bytes(self, bit_length, bit_offset=0, hinting=True):
-        # take only the contextual bits based on the bit_length
-        if bit_length + bit_offset > self.bitspan:
-            raise MemoryRegionError('bit length and offset exceed bitspan')
-
-        # true_offset represents where in the first byte to start reading bits
-
-        if hinting:
-            true_offset = self.bitshift + (bit_offset % 8)
-            start_index = self.bitshift
-        else:
-            true_offset = bit_offset % 8
-
-        converted_bytes = self.read_bitlist_from_bytes(bit_length, bit_offset)
-
-        return list(map(int, converted_bytes))[true_offset:bit_length+true_offset]
-
-    def read_bits(self, bit_length=None, bit_offset=0, hinting=True):
-        if not bit_length:
-            bit_length = self.bitspan
-
-        return self.read_bits_from_bytes(bit_length, bit_offset, hinting)
-
-    def read_bytes_from_bits(self, bit_length, bit_offset=0, hinting=True):
-        return bitlist_to_bytelist(self.read_bits_from_bytes(bit_length, bit_offset, hinting))
-
-    def read_memory(self):
-        return self.read_bytestring(self.shifted_bytespan())
-    
-    def write_bytestring(self, string_val, byte_offset=0):
-        if self.static:
-            raise MemoryRegionError('cannot write to a static region')
-        
-        if (len(string_val)+byte_offset)*8 > align(self.bitspan+self.bitshift, 8):
-            raise MemoryRegionError('list plus offset exceeds memory region boundary')
-
-        if self.allocation:
-            self.allocation.write_bytestring(string_val, byte_offset)
-        else:
-            string_buffer = ctypes.create_string_buffer(bytes(string_val))
-            string_address = ctypes.addressof(string_buffer)
-            ctypes.memmove(int(self.memory_base)+byte_offset, string_address, len(string_val))
-
-    def write_bytes(self, byte_list, byte_offset=0):
-        return self.write_bytestring(bytearray(byte_list), byte_offset)
-
-    def write_bits(self, bit_list, bit_offset=0, hinting=True):
-        if len(bit_list) + bit_offset > self.bitspan:
-            raise MemoryRegionError('list plus offset exceeds memory region boundary')
-
-        if hinting:
-            true_offset = self.bitshift + bit_offset
-        else:
-            true_offset = bit_offset
-            
-        true_terminus = true_offset + len(bit_list)
-        byte_start = int(true_offset/8)
-        byte_end = int(true_terminus/8)
-
-        # value represents the number of bits which overwrite the underlying byte
-        if byte_start == byte_end:
-            single_shift = ((8 - len(bit_list)) - true_offset % 8)
-            value_mask = ((2 ** len(bit_list)) - 1) << single_shift
-            underlying_mask = 0xFF ^ value_mask
-            underlying_value = self.read_bytes(1, byte_start)[0]
-            bit_value = bitlist_to_numeric(bit_list) << single_shift
-            mask_result = underlying_value & underlying_mask | bit_value
-
-            self.write_bytes([mask_result], byte_start)
-            return
-
-        front_remainder = alignment_delta(true_offset, 8)
-
-        if front_remainder:
-            front_bits = bit_list[:front_remainder]
-            front_byte_mask = (0xFF ^ (2 ** front_remainder) - 1)
-            front_byte_value = self.read_bytes(1, byte_start)[0]
-            front_bit_value = bitlist_to_numeric(front_bits)
-            mask_result = front_byte_value & front_byte_mask | front_bit_value
-
-            self.write_bytes([mask_result], byte_start)            
-            byte_start += 1
-
-        # value represents the number of bits which overwrite the underlying byte
-        back_remainder = true_terminus % 8
-
-        if back_remainder:
-            back_bits = bit_list[len(bit_list) - back_remainder:]
-            back_byte_mask = (2 ** back_remainder) - 1
-            back_byte_value = self.read_bytes(1, byte_end)[0]
-            back_bit_value = bitlist_to_numeric(back_bits)
-            mask_result = back_byte_value & back_byte_mask | (back_bit_value << (8 - back_remainder))
-            
-            self.write_bytes([mask_result], byte_end)
-
-        bytebound_list = bit_list[front_remainder:(len(bit_list) - back_remainder)]
-        bytebound_list = bitlist_to_bytelist(bytebound_list)
-        self.write_bytes(bytebound_list, byte_start)
-
-    def write_bits_from_bytes(self, byte_list, bit_offset=0, hinting=True):
-        self.write_bits(bytelist_to_bitlist(byte_list), bit_offset, hinting)
-
-    def write_bytes_from_bits(self, bit_list, byte_offset=0):
-        self.write_bytes(bitlist_to_bytelist(bit_list), byte_offset)
-
-    def move_bits(self, offset_dest, offset_source, length):
-        bitlist = self.read_bits(length, offset_source, False)
-        self.write_bits([0] * length, offset_source, False)
-        self.write_bits(bitlist, offset_dest, False)
-
-    def move_bytes(self, offset_dest, offset_source, length):
-        bytelist = self.read_bytes(length, offset_source)
-        self.write_bytes([0] * len(bytelist), offset_source)
-        self.write_bytes(bytelist, offset_dest)
-
-    def root_parent(self):
-        root_parent = self
-
-        while not root_parent.parent_region == None:
-            root_parent = root_parent.parent_region
-
-        return root_parent
-
-    def is_allocated(self):
-        return not self.allocation is None
-
-    def allocate(self):
-        self.allocation = self.allocator.allocate(self.shifted_bytespan())
-        self.memory_base = self.allocation.address_object()
-
-    def reallocate(self, new_allocation=None):
-        if not self.is_allocated():
-            raise MemoryRegionError('region was not allocated')
-
-        if self.is_bound():
-            raise MemoryRegionError('cannot reallocate a bound memory region')
-        
-        if new_allocation is None:
-            shifted_bytespan = self.shifted_bytespan()
-        else:
-            shifted_bytespan = int(new_allocation / 8)
-            shifted_bytespan += int(not new_allocation % 8 == 0)
-
-        maximum_bytespan = (self.maximum_size)/8 + int(not self.maximum_size % 8 == 0)
-        
-        if not self.maximum_size == 0 and shifted_bytespan > maximum_bytespan:
-            raise MemoryRegionError('new size exceeds maximum size')
-
-        if self.allocation.size == shifted_bytespan:
-            return
-
-        self.allocation.reallocate(shifted_bytespan)
-
-    def resize(self, new_bitspan):
-        if not self.maximum_size == 0 and new_bitspan > self.maximum_size:
-            raise MemoryRegionError('new size exceeds maximum size')
-        
-        if not self.parent_region is None: # subregion
-            self.parent_region.resize_subregion(self.declaration, new_bitspan)
-            return
-
-        self.reallocate(new_bitspan)
-        self.bitspan = new_bitspan
-
-    def hexdump(self):
-        bytelist = self.read_memory()
-        bitlist = self.read_bits()
-        bit_delta = -self.bitshift
-        byte_iterator = 0
-        bit_iterator = 0
-
-        while byte_iterator < align(len(bytelist), 8):
-            if byte_iterator % 8 == 0:
-                sys.stdout.write('%08X:%04X:X ' % (int(self.memory_base)+byte_iterator, byte_iterator))
-
-            if byte_iterator < len(bytelist):
-                sys.stdout.write('%02X%6s ' % (bytelist[byte_iterator], ''))
-            else:
-                sys.stdout.write('%8s ' % '')
-
-            if byte_iterator % 8 == 7:
-                for i in xrange(8):
-                    if byte_iterator-7+i >= len(bytelist):
-                        break
-                    
-                    byte_val = bytelist[byte_iterator-7+i]
-
-                    if byte_val >= 32 and byte_val <= 127:
-                        sys.stdout.write(chr(byte_val))
-                    else:
-                        sys.stdout.write('.')
-                        
-                sys.stdout.write('\n')
-                sys.stdout.write('%08X:%04X:B ' % (int(self.memory_base)+(byte_iterator-7), byte_iterator-7))
-                
-                while bit_iterator + bit_delta < len(bitlist):
-                    bit_offset = bit_iterator + bit_delta
-                    
-                    if bit_offset < 0 or bit_offset >= self.bitspan:
-                        sys.stdout.write(' ')
-                    else:
-                        sys.stdout.write('%d' % bitlist[bit_offset])
-
-                    if bit_iterator % 8 == 7:
-                        sys.stdout.write(' ')
-
-                    bit_iterator += 1
-
-                    if bit_iterator % 64 == 0:
-                        break
-
-                sys.stdout.write('\n\n')
-                
-            byte_iterator += 1
-
-    def set_value(self, value):
-        raise MemoryRegionError('MemoryRegion does not implement set_value')
-
-    def get_value(self, value):
-        raise MemoryRegionError('MemoryRegion does not implement get_value')
-
-    def __hash__(self):
-        return hash('%X/%d/%d' % (int(self.memory_base), self.bitspan, self.bitshift))
-
-    def __setattr__(self, attr, value):
-        if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
-            self.__dict__['declaration'].set_arg(attr, value)
-
-        paranoia_agent.ParanoiaAgent.__setattr__(self, attr, value)
-
-    @classmethod
-    def static_value(cls, **kwargs):
-        raise MemoryRegionError('MemoryRegion does not implement static_value')
-    
-    @classmethod
-    def declare(cls, **kwargs):
-        return declaration.Declaration(base_class=cls, args=kwargs)
-
-    @classmethod
-    def static_bitspan(cls, **kwargs):
-        return kwargs.setdefault('bitspan', cls.BITSPAN)
-
-    @classmethod
-    def static_alignment(cls):
-        return cls.ALIGNMENT
-
-    @classmethod
-    def static_bytespan(cls, **kwargs):
-        bitspan = cls.static_bitspan(**kwargs)
-        alignment = cls.static_alignment()
-        return int(align(bitspan, alignment) / 8)
-
-    @classmethod
-    def subclass(cls, **kwargs):
-        kwargs.setdefault('allocator_class', cls.ALLOCATOR_CLASS)
-        kwargs.setdefault('allocator', cls.ALLOCATOR)
-        kwargs.setdefault('allocation', cls.ALLOCATION)
-        kwargs.setdefault('alignment', cls.ALIGNMENT)
-        kwargs.setdefault('auto_allocate', cls.AUTO_ALLOCATE)
-        kwargs.setdefault('parent_region', cls.PARENT_REGION)
-        kwargs.setdefault('bitspan', cls.BITSPAN)
-        kwargs.setdefault('bitshift', cls.BITSHIFT)
-        kwargs.setdefault('memory_base', cls.MEMORY_BASE)
-        kwargs.setdefault('zero_memory', cls.ZERO_MEMORY)
-        kwargs.setdefault('bind', cls.BIND)
-        kwargs.setdefault('overlaps', cls.OVERLAPS)
-        kwargs.setdefault('shrink', cls.SHRINK)
-        kwargs.setdefault('maximum_size', cls.MAXIMUM_SIZE)
-        kwargs.setdefault('data', cls.DATA)
-        kwargs.setdefault('value', cls.VALUE)
-        kwargs.setdefault('parse_memory', cls.PARSE_MEMORY)
-
-        class SubclassedMemoryRegion(cls):
-            ALLOCATOR_CLASS = kwargs['allocator_class']
-            ALLOCATOR = kwargs['allocator']
-            ALLOCATION = kwargs['allocation']
-            ALIGNMENT = kwargs['alignment']
-            AUTO_ALLOCATE = kwargs['auto_allocate']
-            PARENT_REGION = kwargs['parent_region']
-            BITSPAN = kwargs['bitspan']
-            BITSHIFT = kwargs['bitshift']
-            MEMORY_BASE = kwargs['memory_base']
-            ZERO_MEMORY = kwargs['zero_memory']
-            BIND = kwargs['bind']
-            OVERLAPS = kwargs['overlaps']
-            SHRINK = kwargs['shrink']
-            MAXIMUM_SIZE = kwargs['maximum_size']
-            DATA = kwargs['data']
-            VALUE = kwargs['value']
-            PARSE_MEMORY = kwargs['parse_memory']
-
-        return SubclassedMemoryRegion

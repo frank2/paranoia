@@ -2,7 +2,7 @@
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.base.size import Size
-from paranoia.fundamentals import align
+from paranoia.fundamentals import align, bytelist_to_bitlist, hexdump, bitdump
 
 __all__ = ['BlockError', 'Block', 'BlockLink', 'BlockChain']
     
@@ -12,10 +12,13 @@ class BlockError(ParanoiaError):
 class Block(ParanoiaAgent):
     ADDRESS = None
     VALUE = None
+    STATIC = False
     BUFFER = True
     
     def __init__(self, **kwargs):
         from paranoia.base.address import Address
+
+        self.init_finished = False
 
         self.address = kwargs.setdefault('address', self.ADDRESS)
 
@@ -27,9 +30,15 @@ class Block(ParanoiaAgent):
 
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
         self.value = kwargs.setdefault('value', self.VALUE)
+        self.static = kwargs.setdefault('static', self.STATIC)
 
         if not self.value is None:
             self.set_value(value)
+
+        self.init_finished = True
+
+    def is_static(self):
+        return self.static and self.init_finished
 
     def get_value(self, force=False):
         if self.value is None or force or not self.buffer:
@@ -38,6 +47,9 @@ class Block(ParanoiaAgent):
         return self.value
 
     def set_value(self, value, force=False):
+        if self.is_static():
+            raise BlockError('cannot write to static block')
+        
         if not 0 <= value < 256:
             raise BlockError('value must be 0 <= value < 256')
         
@@ -72,6 +84,9 @@ class Block(ParanoiaAgent):
     def flush(self):
         if self.value is None:
             return
+
+        if self.is_static():
+            raise BlockError('cannot write to static region')
         
         self.address.write_byte(self.value)
 
@@ -139,6 +154,9 @@ class BlockLink(Block):
         return value
 
     def set_value(self, value, force=False):
+        if self.is_static():
+            raise BlockError('cannot write to static link')
+        
         if not 0 <= value < 256:
             raise BlockError('value must be 0 <= value < 256')
 
@@ -163,6 +181,9 @@ class BlockLink(Block):
             self.flush()
 
     def flush(self):
+        if self.is_static():
+            raise BlockError('cannot write to static link')
+        
         if self.shift == 0:
             self.address.get_block().flush()
         else:
@@ -179,12 +200,16 @@ class BlockChain(ParanoiaAgent):
     SHIFT = 0
     BUFFER = True
     SIZE = Size(bits=0)
+    BIND = False
+    STATIC = False
     MAXIMUM_SIZE = None
     PARSE_MEMORY = False
 
     def __init__(self, **kwargs):
         from paranoia.base.address import Address
         from paranoia.base.allocator import Allocator
+
+        self.init_finished = False
         
         self.address = kwargs.setdefault('address', self.ADDRESS)
 
@@ -199,6 +224,8 @@ class BlockChain(ParanoiaAgent):
         self.auto_allocate = kwargs.setdefault('auto_allocate', self.AUTO_ALLOCATE)
         self.shift = kwargs.setdefault('shift', self.SHIFT)
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
+        self.bind = kwargs.setdefault('bind', self.BIND)
+        self.static = kwargs.setdefault('static', self.STATIC)
         self.allocation = None
 
         maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
@@ -214,31 +241,47 @@ class BlockChain(ParanoiaAgent):
             self.allocation = self.allocator.allocate(self.blockspan())
             self.address = self.allocation.address()
 
-        parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
+        self.init_finished = True
 
-        if 'bit_data' in kwargs:
-            self.parse_bit_data(kwargs['bit_data'])
-        elif 'link_data' in kwargs:
-            self.parse_link_data(kwargs['link_data'])
-        elif 'block_data' in kwargs:
-            self.parse_block_data(kwargs['block_data'])
-        elif parse_memory:
-            self.parse_memory()
+    def get_link(self, index):
+        if index < 0:
+            index += len(self)
+
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+
+        return BlockLink(address=self.address.fork(index)
+                         ,shift=self.shift
+                         ,buffer=self.buffer
+                         ,static=self.static)
+
+    def is_bound(self):
+        return self.bind and self.init_finished
+
+    def is_static(self):
+        return self.static and self.init_finished
+
+    def is_allocated(self):
+        return not self.allocation is None
 
     def set_maximum_size(self, max_size):
+        if self.is_bound():
+            raise BlockError('cannot resize bound chain')
+        
         if max_size is None:
             self.maximum_size = None
-        elif isinstance(max_size, int): # interpret as bytespan
-            self.maximum_size = Size(bytes=max_size)
         elif isinstance(max_size, Size):
             self.maximum_size = Size(bits=max_size.bits)
         else:
-            raise BlockError('size must be an integer representing the bytespan or a Size object')
+            raise BlockError('size must be a Size object')
 
         if not self.maximum_size is None and self.size.bits > self.maximum_size.bits:
             raise BlockError('new maximum exceeds current size')
 
     def set_size(self, chain_length):
+        if self.is_bound():
+            raise BlockError('cannot resize bound chain')
+        
         self.flush()
         
         if isinstance(chain_length, Size):
@@ -253,7 +296,8 @@ class BlockChain(ParanoiaAgent):
             self.allocation.reallocate(self.blockspan())
 
     def set_shift(self, shift):
-        self.flush()
+        if not self.is_static():
+            self.flush()
 
         if not 0 <= shift < 8:
             raise BlockError('shift must be 0 <= shift < 8')
@@ -264,65 +308,19 @@ class BlockChain(ParanoiaAgent):
 
         new_span = self.blockspan()
 
-        if not old_span == new_span and not self.allocation is None:
+        if not old_span == new_span and not self.allocation is None and not self.is_bound():
             self.allocation.reallocate(self.blockspan())
-
-    def parse_bit_data(self, bit_data):
-        for i in xrange(len(bit_data)):
-            if i >= self.size.bits:
-                break
-
-            self[int(i/8)][i%8] = bit_data[i]
-
-        if not self.buffer:
-            self.flush()
-
-    def parse_link_data(self, link_data):
-        if isinstance(link_data, str):
-            link_data = map(ord, link_data)
-
-        for i in xrange(len(link_data)):
-            if i >= len(self):
-                break
-            
-            self[i].set_value(link_data[i])
-
-        if not self.buffer:
-            self.flush()
-
-    def parse_block_data(self, block_data):
-        if isinstance(block_data, str):
-            block_data = map(ord, block_data)
-
-        blocks = list(self.block_iterator())
-        
-        for i in xrange(len(block_data)):
-            if i >= len(blocks):
-                break
-            
-            blocks[i].set_value(block_data[i])
-
-        if not self.buffer:
-            self.flush()
-
-    def parse_memory(self):
-        block_bytes = list()
-
-        for block in self.block_iterator():
-            block_bytes.append(block.get_value(force=True))
-
-        self.parse_block_data(block_bytes)
 
     def blockspan(self):
         return int(align(self.size.bits + self.shift, 8)/8)
 
     def bit_iterator(self):
         for i in xrange(self.size.bits):
-            yield self[int(i/8)][i%8]
+            yield self.get_link(int(i/8)).get_bit(i%8)
 
     def link_iterator(self):
         for i in xrange(self.size.byte_length()):
-            yield self[i]
+            yield self.get_link(i)
 
     def byte_iterator(self):
         for link in self.link_iterator():
@@ -352,7 +350,7 @@ class BlockChain(ParanoiaAgent):
         bits = list()
         
         for i in range(bit_offset, stop):
-            bits.append(self[int(i/8)].get_bit(i%8, force))
+            bits.append(self.get_link(int(i/8)).get_bit(i%8, force))
 
         return bits
 
@@ -374,7 +372,7 @@ class BlockChain(ParanoiaAgent):
         byte_vals = list()
 
         for i in range(offset, stop):
-            byte_vals.append(self[i].get_value(force))
+            byte_vals.append(self.get_link(i).get_value(force))
 
         return byte_vals
 
@@ -413,7 +411,7 @@ class BlockChain(ParanoiaAgent):
             raise BlockError('bitlist exceeds region size')
 
         for i in range(bit_offset, bits+bit_offset):
-            self[int(i/8)].set_bit(i%8, bits[i-bit_offset], force)
+            self.get_link(int(i/8)).set_bit(i%8, bits[i-bit_offset], force)
 
         if not self.buffer and not force:
             self.flush()
@@ -425,7 +423,7 @@ class BlockChain(ParanoiaAgent):
             raise BlockError('bytelist exceeds region size')
 
         for i in range(offset, offset+bytecount):
-            self[i].set_value(byte_list[i], force)
+            self.get_link(i).set_value(byte_list[i], force)
 
         if not self.buffer and not force:
             self.flush()
@@ -448,16 +446,14 @@ class BlockChain(ParanoiaAgent):
         if not self.buffer and not force:
             self.flush()
 
+    def hexdump(self, label=None):
+        hexdump(int(self.address), self.blockspan(), label)
+
+    def bitdump(self, label=None):
+        bitdump(int(self.address), int(self.size), self.shift, label)
+
     def __getitem__(self, index):
-        if index < 0:
-            index += len(self)
-
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
-
-        return BlockLink(address=self.address.fork(index)
-                         ,shift=self.shift
-                         ,buffer=self.buffer)
+        return self.get_link(index)
 
     def __setitem__(self, index, block_or_int):
         if not isinstance(block, (Block, BlockLink, int)):

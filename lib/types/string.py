@@ -2,9 +2,8 @@
 
 import ctypes
 
-from paranoia.converters import bitlist_to_bytelist
+from paranoia.fundamentals import bitlist_to_bytelist
 from paranoia.meta.array import Array, ArrayError
-from paranoia.base.memory_region import sizeof
 from paranoia.types.char import Char
 from paranoia.types.wchar import Wchar
 

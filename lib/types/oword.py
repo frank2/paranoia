@@ -9,5 +9,5 @@ __all__ = ['Oword', 'OwordArray']
 class Oword(NumericRegion):
     BITSPAN = Size(bytes=16)
 
-class OwordArray(array.Array):
+class OwordArray(Array):
     BASE_DECLARATION = Oword

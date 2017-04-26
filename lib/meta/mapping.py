@@ -3,15 +3,16 @@
 import copy
 import inspect
 
-from paranoia.meta import list as d_list
-from paranoia.base import declaration, memory_region
+from paranoia.meta.declaration import Declaration
+from paranoia.meta.list import List, ListError
+from paranoia.meta.region import Region
 
 __all__ = ['MappingError', 'Mapping']
 
-class MappingError(d_list.ListError):
+class MappingError(ListError):
     pass
 
-class Mapping(d_list.List):
+class Mapping(List):
     FIELDS = None
 
     def __init__(self, **kwargs):
@@ -24,7 +25,7 @@ class Mapping(d_list.List):
         self.field_map, self.anon_map, self.declarations = self.parse_fields(self.declaration)
         kwargs['declarations'] = self.declarations
         
-        d_list.List.__init__(self, **kwargs)
+        super(Mapping, self).__init__(**kwargs)
 
     def parse_fields(self, decl):
         if not isinstance(decl, declaration.Declaration):

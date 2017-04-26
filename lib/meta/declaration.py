@@ -1,12 +1,22 @@
 #!/usr/bin/env python
 
 from paranoia.base import paranoia_agent
-from paranoia.fundamentals import dict_merge
+from paranoia.fundamentals import dict_merge, align
 
-__all__ = ['DeclarationError', 'Declaration']
+__all__ = ['DeclarationError', 'Declaration', 'ensure_declaration']
 
 class DeclarationError(paranoia_agent.ParanoiaError):
     pass
+
+def ensure_declaration(obj):
+    from paranoia.meta.region import is_region_class
+    
+    if isinstance(obj, Declaration):
+        return obj
+    elif is_region_class(obj):
+        return obj.declare()
+    else:
+        raise DeclarationError('declaration must be either a Declaration object or a Region class')
 
 class Declaration(paranoia_agent.ParanoiaAgent):
     BASE_CLASS = None
@@ -50,6 +60,11 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
         return size
 
+    def blockspan(self, **kwargs):
+        size = self.size(**kwargs)
+        shift = self.get_arg('shift')
+        return int(align(int(size)+shift, 8)/8)
+
     def alignment(self):
         alignment = self.get_arg('alignment')
         
@@ -57,6 +72,14 @@ class Declaration(paranoia_agent.ParanoiaAgent):
             return self.base_class.static_alignment()
 
         return alignment
+
+    def volatile(self):
+        return self.get_arg('volatile')
+
+    def bit_parser(self, **kwargs):
+        dict_merge(kwargs, self.args)
+        
+        return self.base_class.bit_parser(**kwargs)
 
     def get_arg(self, arg):
         if not arg in self.args:

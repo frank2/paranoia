@@ -9,6 +9,6 @@ __all__ = ['Word', 'WordArray']
 class Word(NumericRegion):
     SIZE = Size(bytes=2)
 
-class WordArray(array.Array):
+class WordArray(Array):
     BASE_DECLARATION = Word
 

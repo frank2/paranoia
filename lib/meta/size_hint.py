@@ -1,20 +1,22 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
+from paranoia.meta.region import NumericRegion, RegionError
 
 __all__ = ['SizeHintError', 'SizeHint']
 
-class SizeHintError(numeric_region.NumericRegionError):
+class SizeHintError(RegionError):
     pass
 
-class SizeHint(numeric_region.NumericRegion):
+class SizeHint(NumericRegion):
     DECLARATION_OFFSET = None
     DECLARATION_ID = None
     FIELD_NAME = None
     ACTION = None
+    VOLATILE = True
 
     def __init__(self, **kwargs):
-        numeric_region.NumericRegion.__init__(self, **kwargs)
+        super(SizeHint, self).__init__(**kwargs)
+        
         self.init_finished = False
         
         declaration_offset = kwargs.setdefault('declaration_offset', self.DECLARATION_OFFSET)

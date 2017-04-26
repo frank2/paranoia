@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
-from paranoia.base import numeric_region
-from paranoia.meta import array
-from paranoia.types import byte
+from paranoia.meta.array import Array
+from paranoia.meta.region import NumericRegion, RegionError
+from paranoia.types.byte import Byte
 
 __all__ = ['CharError', 'Char', 'CharArray']
 
-class CharError(numeric_region.NumericRegionError):
+class CharError(RegionError):
     pass
 
-class Char(byte.Byte):
+class Char(Byte):
     def get_char_value(self):
         return chr(self.get_value())
 
@@ -22,5 +22,5 @@ class Char(byte.Byte):
 
         self.set_value(ord(char))
 
-class CharArray(array.Array):
+class CharArray(Array):
     BASE_DECLARATION = Char
