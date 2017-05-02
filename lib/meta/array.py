@@ -3,6 +3,7 @@
 import inspect
 
 from paranoia.fundamentals import align
+from paranoia.base import Size
 from paranoia.meta.declaration import Declaration, ensure_declaration
 from paranoia.meta.list import ListError, List
 
@@ -38,7 +39,7 @@ class Array(List):
     def parse_elements(self):
         if self.elements == len(self.declarations):
             return
-        
+
         if self.is_bound():
             raise ArrayError('cannot resize bound array')
 
@@ -67,16 +68,29 @@ class Array(List):
             super(Array, self).__setattr__(attr, value)
 
     @classmethod
-    def static_bitspan(cls, **kwargs):
+    def static_size(cls, **kwargs):
+        base_decl = kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
+        
+        if base_decl is None:
+            raise ArrayError('no base declaration to get base size from')
+
+        base_decl = ensure_declaration(base_decl)
+        base_size = base_decl.size()
+        elements = kwargs.setdefault('elements', cls.ELEMENTS)
+        return base_size * elements
+
+    @classmethod
+    def bit_parser(cls, **kwargs):
         base_decl = kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
         
         if base_decl is None:
             raise ArrayError('no base declaration to get base bitspan from')
 
-        base_decl = memory_region.ensure_declaration(base_decl)
-        base_bitspan = base_decl.bitspan()
+        base_decl = ensure_declaration(base_decl)
         elements = kwargs.setdefault('elements', cls.ELEMENTS)
-        return base_bitspan * elements
+        kwargs['declarations'] = [base_decl.copy() for i in xrange(elements)]
+        
+        return super(Array, cls).bit_parser(**kwargs)
         
     @classmethod
     def subclass(cls, **kwargs):

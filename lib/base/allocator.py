@@ -76,18 +76,24 @@ class Allocation(ParanoiaAgent):
     def is_null(self):
         return self.id == 0
     
-    def in_range(self, other_id):
-        return self.id <= other_id < self.id+self.size
+    def in_range(self, other_id, inclusive=False):
+        if inclusive:
+            return self.id <= other_id <= self.id+self.size
+        else:
+            return self.id <= other_id < self.id+self.size
 
     def check_id(self):
         if self.is_null():
             raise AllocationError('id is null')
 
-    def check_id_range(self, other_id):
-        if not self.in_range(other_id):
+    def check_id_range(self, other_id, inclusive=False):
+        if not self.in_range(other_id, inclusive):
             raise AllocationError('id out of range')
 
     def address(self, offset=0):
+        if offset > self.size:
+            raise AllocationError('address out of range')
+        
         if not offset in self.addresses:
             self.addresses[offset] = Address(offset=offset, allocation=self)
             

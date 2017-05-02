@@ -22,18 +22,17 @@ class Block(ParanoiaAgent):
 
         self.address = kwargs.setdefault('address', self.ADDRESS)
 
-        if self.address is None:
-            raise BlockError('address cannot be None')
-
-        if not isinstance(self.address, Address):
+        if not self.address is None and not isinstance(self.address, Address):
             raise BlockError('address must be an Address instance')
 
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-        self.value = kwargs.setdefault('value', self.VALUE)
         self.static = kwargs.setdefault('static', self.STATIC)
+        value = kwargs.setdefault('value', self.VALUE)
 
-        if not self.value is None:
+        if not value is None:
             self.set_value(value)
+        else:
+            self.value = None
 
         self.init_finished = True
 
@@ -41,7 +40,7 @@ class Block(ParanoiaAgent):
         return self.static and self.init_finished
 
     def get_value(self, force=False):
-        if self.value is None or force or not self.buffer:
+        if (self.value is None or force or not self.buffer) and not self.address is None:
             self.value = self.address.read_byte()
             
         return self.value
@@ -82,7 +81,7 @@ class Block(ParanoiaAgent):
         self.set_value(value, force)
 
     def flush(self):
-        if self.value is None:
+        if self.value is None or self.address is None:
             return
 
         if self.is_static():
@@ -211,10 +210,8 @@ class BlockChain(ParanoiaAgent):
 
         self.init_finished = False
         
-        self.address = kwargs.setdefault('address', self.ADDRESS)
-
-        if not self.address is None and not isinstance(self.address, Address):
-            raise BlockError('address must be an Address object')
+        address = kwargs.setdefault('address', self.ADDRESS)
+        self.set_address(address)
 
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
 
@@ -239,9 +236,15 @@ class BlockChain(ParanoiaAgent):
 
         if self.address is None:
             self.allocation = self.allocator.allocate(self.blockspan())
-            self.address = self.allocation.address()
+            self.set_address(self.allocation.address())
 
         self.init_finished = True
+
+    def set_address(self, address):
+        if not address is None and not isinstance(address, Address):
+            raise BlockError('address must be an Address object')
+
+        self.address = address
 
     def get_link(self, index):
         if index < 0:
@@ -411,7 +414,7 @@ class BlockChain(ParanoiaAgent):
             raise BlockError('bitlist exceeds region size')
 
         for i in range(bit_offset, bits+bit_offset):
-            self.get_link(int(i/8)).set_bit(i%8, bits[i-bit_offset], force)
+            self.get_link(int(i/8)).set_bit(i%8, bit_list[i-bit_offset], force)
 
         if not self.buffer and not force:
             self.flush()

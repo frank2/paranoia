@@ -62,8 +62,6 @@ class Address(ParanoiaAgent):
             self.offset = value
 
     def fork(self, offset):
-        self.allocation.check_id_range(int(self)+offset)
-        
         return self.allocation.address(self.offset+offset)
 
     def copy(self):

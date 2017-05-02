@@ -61,15 +61,21 @@ class List(Region):
 
     def parse_bit_data(self, bit_data):
         mapper = self.map_declarations()
+        total_parsed = 0
 
         for decl in mapper:
             offset = self.subregion_offsets[id(decl)]
             parsed = decl.bit_parser(bit_data=bit_data[offset:])
-
+            
             if not parsed == decl.size():
-                self.resize_subregion(decl, parsed)
+                decl.set_size(parsed)
 
-            self.write_bits(bit_data[offset:offset+parsed], offset)
+            self.write_bits(bit_data[offset:offset+int(parsed)], offset)
+            total_parsed = offset + int(parsed)
+
+        self.flush()
+
+        return total_parsed
         
     def map_declarations(self):
         if self.mapped:
@@ -82,12 +88,9 @@ class List(Region):
             self.declaration_index[id(decl)] = i
                 
             yield decl
-
-            if decl.volatile():
-                self.instantiate(i)
                 
-            if decl.is_size_hint():
-                self[i].resolve()
+            if decl.size_hint():
+                self.instantiate(i).resolve()
 
         self.mapped = True
 
@@ -125,22 +128,23 @@ class List(Region):
 
         current_offset = self.subregion_offsets[id(decl)]
         current_index = self.declaration_index[id(decl)]
-        size_delta = new_size - decl.bitspan()
+        size_delta = new_size - decl.size()
 
         if size_delta == 0:
             return
 
         if size_delta > 0:
-            old_size = decl.get_arg('bitspan')
-            decl.set_arg('bitspan', new_size)
-            new_size = self.__class__.declarative_size(self.overlaps, self.declarations)
+            old_size = decl.get_arg('size')
+            decl.set_arg('size', new_size)
+            new_size = self.static_size(overlaps=self.overlaps
+                                        ,declarations=self.declarations)
 
             # region must be resized first to accomodate new_size, then other regions
             # can be moved
             self.resize(new_size)
 
             # set it back to the old size and let resize_subregion do its thing
-            decl.set_arg('bitspan', old_size)
+            decl.set_arg('size', old_size)
 
             deltas = self.movement_deltas(current_index, size_delta)
             targets = deltas.keys()
@@ -194,7 +198,8 @@ class List(Region):
             for offset in targets:
                 self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
 
-            new_list_size = List.declarative_size(self.overlaps, self.declarations)
+            new_list_size = List.static_size(overlaps=self.overlaps
+                                             ,declarations=self.declarations)
 
             # region can now be resized
             self.resize(new_list_size)
@@ -211,7 +216,8 @@ class List(Region):
         self.declarations.insert(index, decl)
 
         try:
-            self.resize(self.static_size(declarations=self.declarations))
+            self.resize(self.static_size(overlaps=self.overlaps
+                                         ,declarations=self.declarations))
         except Exception,e:
             self.declarations.pop(index)
             raise e
@@ -315,7 +321,7 @@ class List(Region):
                 if not decl.size() == 0:
                     size = decl.align(offset, shift) + decl.size()
                     
-                offset = size
+                offset = int(size)
 
         return size
 
@@ -325,6 +331,10 @@ class List(Region):
         overlap = kwargs.setdefault('overlaps', cls.OVERLAPS)
         shift = kwargs.setdefault('shift', cls.SHIFT)
         declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
+        declaration = kwargs.setdefault('declaration', cls.DECLARATION)
+
+        if declaration is None:
+            declaration = Declaration(base_class=cls, args=kwargs)
 
         if 'block_data' in kwargs:
             bit_data = bytelist_to_bitlist(kwargs['block_data'])[shift:]
@@ -343,7 +353,14 @@ class List(Region):
                     size = parsed
             else:
                 size = decl.align(size, shift)
-                parsed = decl.bit_parser(bit_data=bit_data[size:], shift=shift)
+                parsed = decl.bit_parser(bit_data=bit_data[size:]
+                                         ,shift=shift)
+
+                if decl.size_hint():
+                    decl.resolve(parent_declaration=declaration
+                                 ,bit_data=bit_data[size:]
+                                 ,shift=shift)
+
                 size += parsed
 
         return size
