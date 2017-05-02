@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import inspect
+
 from paranoia.base import paranoia_agent
 from paranoia.fundamentals import dict_merge, align
 
@@ -28,7 +30,7 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         if self.base_class is None:
             raise DeclarationError('base_class cannot be None')
 
-        if not inspect.isclass(self.base_class)
+        if not inspect.isclass(self.base_class):
             raise DeclarationError('base_class must be a class')
 
         self.args = kwargs.setdefault('args', self.ARGS)

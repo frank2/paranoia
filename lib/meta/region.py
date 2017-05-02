@@ -5,10 +5,9 @@ import inspect
 import sys
 
 from paranoia.base.address import Address
-from paranoia.base.allocator import heap, Allocator
 from paranoia.base.block import Block, BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
-from paranoia.meta.declaration import Declaration, DeclarationError, ensure_declaration
+from paranoia.meta.declaration import Declaration, DeclarationError
 from paranoia.fundamentals import *
 
 try:
@@ -27,10 +26,10 @@ def sizeof(memory_region):
         return memory_region.static_size().byte_length()
     elif isinstance(memory_region, Region):
         return memory_region.size.byte_length()
-    elif isinstance(memory_region, Declaration):
+    elif isinstance(memory_region, RegionDeclaration):
         return memory_region.size()
     else:
-        raise RegionError('given argument must be a Declaration object or an instance or class deriving Region')
+        raise RegionError('given argument must be a RegionDeclaration object or an instance or class deriving Region')
 
 class RegionDeclarationError(DeclarationError):
     pass
@@ -375,7 +374,7 @@ class RegionError(ParanoiaError):
     pass
 
 class Region(BlockChain):
-    DECLARATION_CLASS = None
+    DECLARATION_CLASS = RegionDeclaration
     DECLARATION = None
     PARENT_DECLARATION = None
     ALIGNMENT = 8
