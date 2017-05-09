@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
+import copy
 import inspect
 
-from paranoia.base import paranoia_agent
+from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.fundamentals import dict_merge, align
 
 __all__ = ['DeclarationError', 'Declaration', 'ensure_declaration']
 
-class DeclarationError(paranoia_agent.ParanoiaError):
+class DeclarationError(ParanoiaError):
     pass
 
 def ensure_declaration(obj):
@@ -20,7 +21,7 @@ def ensure_declaration(obj):
     else:
         raise DeclarationError('declaration must be either a Declaration object or a Region class')
 
-class Declaration(paranoia_agent.ParanoiaAgent):
+class Declaration(ParanoiaAgent):
     BASE_CLASS = None
     ARGS = None
 
@@ -41,7 +42,7 @@ class Declaration(paranoia_agent.ParanoiaAgent):
         if not isinstance(self.args, dict):
             raise DeclarationError('args must be a dictionary object')
 
-        self.instance = None
+        self.instance = kwargs.setdefault('instance', None)
 
     def instantiate(self, **kwargs):
         dict_merge(kwargs, self.args)
@@ -64,7 +65,7 @@ class Declaration(paranoia_agent.ParanoiaAgent):
 
     def copy(self):
         copied = self.__class__(base_class=self.base_class
-                                ,args=dict(list(self.args.items())[:]))
+                                ,args=copy.deepcopy(self.args))
 
         return copied
 

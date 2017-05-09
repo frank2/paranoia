@@ -4,40 +4,63 @@ import copy
 import inspect
 
 from paranoia.meta.declaration import Declaration, ensure_declaration
-from paranoia.meta.list import List, ListError
+from paranoia.meta.list import ListDeclaration, ListDeclarationError, List, ListError
 from paranoia.meta.region import Region
 
-__all__ = ['MappingError', 'Mapping']
+__all__ = ['MappingDeclarationError', 'MappingDeclaration', 'MappingError', 'Mapping']
+
+class MappingDeclarationError(ListError):
+    pass
+
+class MappingDeclaration(ListDeclaration):
+    def __init__(self, **kwargs):
+        args = kwargs.setdefault('args', dict())
+
+        fields = kwargs.get('fields')
+
+        if fields is None:
+            fields = list()
+
+        field_map, anon_map, declarations = self.parse_fields(fields)
+
+        args['field_map'] = field_map
+        args['anon_map'] = anon_map
+        args['declarations'] = declarations
+
+        super(MappingDeclaration, self).__init__(**kwargs)
+
+        self.set_arg('field_map', field_map)
+        self.set_arg('anon_map', anon_map)
+
+    def get_field_offset(self, field):
+        if field in self.field_map:
+            decl_id = self.field_map[field]
+        else:
+            raise MappingDeclarationError('no such field %s in field map' % field)
+
+        if not decl_id in self.declaration_index:
+            raise MappingDeclarationError('declaration not in list')
+            
+        return self.declaration_index[decl_id]
+
+    def get_field(self, field):
+        declarations = self.get_arg('declarations')
+        field_map = self.get_arg('field_map')
+        anon_map = self.get_arg('anon_map')
+
+        return declarations[self.get_field_offset(field)]
 
 class MappingError(ListError):
     pass
 
 class Mapping(List):
+    DECLARATION_CLASS = MappingDeclaration
     FIELDS = None
 
     def __init__(self, **kwargs):
-        self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
-
-        if self.declaration is None:
-            self.declaration = Declaration(base_class=self.__class__, args=kwargs)
-            
-        self.declaration = ensure_declaration(self.declaration)
-        self.field_map, self.anon_map, self.declarations = self.parse_fields(self.declaration)
-        kwargs['declarations'] = self.declarations
+        self.fields = kwargs.setdefault('fields', self.FIELDS)
         
         super(Mapping, self).__init__(**kwargs)
-
-    def get_field_declaration(self, field):
-        if field in self.field_map:
-            decl_id = self.field_map[field]
-        else:
-            raise AttributeError(field)
-
-        if not decl_id in self.declaration_index:
-            raise AttributeError(field)
-            
-        offset = self.declaration_index[decl_id]
-        return (offset, self.declarations[offset])
 
     def get_field(self, field):
         if field in self.field_map:

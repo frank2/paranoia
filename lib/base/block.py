@@ -211,7 +211,6 @@ class BlockChain(ParanoiaAgent):
         self.init_finished = False
         
         address = kwargs.setdefault('address', self.ADDRESS)
-        self.set_address(address)
 
         self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
 
@@ -224,6 +223,7 @@ class BlockChain(ParanoiaAgent):
         self.bind = kwargs.setdefault('bind', self.BIND)
         self.static = kwargs.setdefault('static', self.STATIC)
         self.allocation = None
+        self.address = None
 
         maximum_size = kwargs.setdefault('maximum_size', self.MAXIMUM_SIZE)
         self.set_maximum_size(maximum_size)
@@ -231,20 +231,27 @@ class BlockChain(ParanoiaAgent):
         chain_length = kwargs.setdefault('size', self.SIZE)
         self.set_size(chain_length)
 
-        if self.address is None and not self.auto_allocate:
+        if address is None and not self.auto_allocate:
             raise BlockError('address is None and auto_allocate is False')
 
-        if self.address is None:
+        if address is None:
             self.allocation = self.allocator.allocate(self.blockspan())
             self.set_address(self.allocation.address())
+        else:
+            self.set_address(address)
 
         self.init_finished = True
 
-    def set_address(self, address):
+    def set_address(self, address, shift=None):
+        from paranoia.base.address import Address
+        
         if not address is None and not isinstance(address, Address):
             raise BlockError('address must be an Address object')
 
         self.address = address
+
+        if not shift is None:
+            self.set_shift(shift)
 
     def get_link(self, index):
         if index < 0:
@@ -335,7 +342,7 @@ class BlockChain(ParanoiaAgent):
             yield self.address.get_block(i)
 
     def flush(self):
-        if not self.address is None:
+        if not self.address is None and self.init_finished:
             self.address.flush(size=self.blockspan())
 
     def read_bits(self, bit_offset=0, size=None, force=False):
@@ -471,5 +478,5 @@ class BlockChain(ParanoiaAgent):
         return self.size.byte_length()
 
     def __del__(self):
-        if not self.allocation is None:
+        if not getattr(self, 'allocation', None) is None:
             self.allocation.free()

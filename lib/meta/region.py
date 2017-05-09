@@ -41,11 +41,14 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.subregions = dict()
         self.subregion_offsets = dict()
 
-    def set_address(self, address):
+    def set_address(self, address, shift=None):
         if self.instance is None:
             self.set_arg('address', address)
         else:
             BlockChain.set_address(self.instance, address)
+
+        if not shift is None:
+            self.set_shift(shift)    
 
     def set_shift(self, shift):
         if self.instance is None:
@@ -68,6 +71,12 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         self.set_arg('size', size)
 
+    def is_bound(self):
+        return self.get_arg('bind') and self.get_arg('init_finished')
+
+    def is_static(self):
+        return self.get_arg('static') and self.get_arg('init_finished')
+
     def align(self, offset, shift):
         alignment = self.get_arg('alignment')
 
@@ -82,13 +91,15 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         size = self.get_arg('size')
 
         if size is None or int(size) == 0:
-            return self.base_class.static_size(**kwargs)
+            size = self.base_class.static_size(**kwargs)
 
         return size
 
     def bit_parser(self, **kwargs):
         dict_merge(kwargs, self.args)
 
+        kwargs['declaration'] = self
+        
         return self.base_class.bit_parser(**kwargs)
 
     def get_value(self, **kwargs):
@@ -100,7 +111,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if value is None:
             dict_merge(kwargs, self.args)
-            return self.base_class.static_value(**kwargs)
+            value = self.base_class.static_value(**kwargs)
 
         return value
 
@@ -114,20 +125,15 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if not isinstance(new_base, Address):
             raise RegionError('new memory base must be an Address object')
 
-        self.set_address(new_base)
-        self.set_shift(new_shift)
+        self.set_address(new_base, new_shift)
 
-        regions = self.subregion_offsets.items()
-        regions.sort(lambda x,y: cmp(x[1], y[1]))
+        for decl_id in self.subregions:
+            decl = self.subregions[decl_id]
+            offset = self.subregion_offsets[decl_id]
+            base = self.bit_offset_to_base(offset, decl.get_arg('alignment'))
+            shift = self.bit_offset_to_shift(offset, decl.get_arg('alignment'))
 
-        for region in regions:
-            ident, offset = region
-            decl = self.subregions[ident]
-
-            new_sub_base = self.bit_offset_to_base(offset, decl.get_arg('alignment'))
-            new_sub_shift = self.bit_offset_to_shift(offset, decl.get_arg('alignment'))
-
-            decl.rebase(new_sub_base, new_sub_shift)
+            decl.rebase(base, shift)
 
     def subregion_ranges(self):
         regions = self.subregion_offsets.items()
@@ -207,7 +213,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
 
-        if bit_offset+int(decl.size()) > int(self.size):
+        if bit_offset+int(decl.size()) > int(self.size()):
             try:
                 self.accomodate_subregion(decl, decl.size())
             except Exception as e:
@@ -215,11 +221,11 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 del self.subregion_offsets[id(decl)]
                 raise e
 
-        if not self.get_arg('address') is None:
+        if not decl.get_arg('address') is None:
             new_base = self.bit_offset_to_base(bit_offset, decl.get_arg('alignment'))
         else:
             new_base = None
-
+            
         new_shift = self.bit_offset_to_shift(bit_offset, decl.get_arg('alignment'))
 
         if not new_base is None:
@@ -363,10 +369,12 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         return address.fork(bytecount)
 
     def bit_offset_to_shift(self, bit_offset, alignment):
+        shift = self.get_arg('shift')
+        
         if alignment == Region.ALIGN_BLOCK:
-            aligned = align(self.shift + bit_offset, 8)
+            aligned = align(shift + bit_offset, 8)
         else:
-            aligned = self.shift + align(bit_offset, alignment)
+            aligned = shift + align(bit_offset, alignment)
 
         return aligned % 8
 
@@ -386,16 +394,20 @@ class Region(BlockChain):
     ALIGN_BLOCK = 0
 
     def __init__(self, **kwargs):
-        self.declaration_class = kwargs.setdefault('declaration_class', self.DECLARATION)
+        self.declaration_class = kwargs.setdefault('declaration_class', self.DECLARATION_CLASS)
         self.declaration = kwargs.setdefault('declaration', self.DECLARATION)
 
         if self.declaration is None:
             if self.declaration_class is None:
                 raise RegionError('both declaration and declaration_class cannot be None')
             
-            self.declaration = self.declaration_class(args=kwargs)
+            self.declaration = self.declaration_class(base_class=self.__class__
+                                                      ,args=kwargs
+                                                      ,instance=self)
+            kwargs = self.declaration.args
         elif is_region(self.declaration):
             self.declaration = self.declaration.declare(**kwargs)
+            kwargs = self.declaration.args
 
         if not isinstance(self.declaration, Declaration):
             raise RegionError('declaration must be a Declaration object')
@@ -403,6 +415,7 @@ class Region(BlockChain):
             raise RegionError('declaration base_class mismatch')
 
         self.declaration.instance = self
+        dict_merge(kwargs, self.declaration.args)
 
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
@@ -430,16 +443,25 @@ class Region(BlockChain):
 
         self.init_finished = True
 
-    def set_address(self, address):
-        self.declaration.rebase(address)
+        # rebase the declaration to our new address
+        self.declaration.rebase(self.address, self.shift)
+
+    def set_address(self, address, shift=None):
+        if not self.init_finished:
+            super(Region, self).set_address(address, shift)
+            return
+        
+        if shift is None:
+            shift = self.shift
+            
+        self.declaration.rebase(address, shift)
 
     def set_size(self, size):
         self.declaration.set_size(size)
 
     def parse_bit_data(self, bit_data):
-        parsed = self.declaration.bit_parser(bit_data=bit_data
-                                             ,shift=self.shift)
-
+        parsed = self.declaration.bit_parser(bit_data=bit_data)
+        
         if parsed > self.size:
             self.set_size(parsed)
 
@@ -483,17 +505,13 @@ class Region(BlockChain):
 
     def __setattr__(self, attr, value):
         if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
-            self.__dict__['declaration'].set_arg(attr, value)
+            self.__dict__['declaration'].set_arg(attr, value, True)
 
         super(Region, self).__setattr__(attr, value)
 
     @classmethod
     def static_size(cls, **kwargs):
         return cls.SIZE
-
-    @classmethod
-    def static_alignment(cls):
-        return cls.ALIGNMENT
     
     @classmethod
     def declare(cls, **kwargs):

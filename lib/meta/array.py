@@ -4,68 +4,86 @@ import inspect
 
 from paranoia.fundamentals import align
 from paranoia.base import Size
-from paranoia.meta.declaration import Declaration, ensure_declaration
-from paranoia.meta.list import ListError, List
+from paranoia.meta.declaration import ensure_declaration
+from paranoia.meta.region import RegionDeclaration
+from paranoia.meta.list import ListDeclarationError, ListDeclaration, ListError, List
 
-__all__ = ['ArrayError', 'Array']
+__all__ = ['ArrayDeclarationError', 'ArrayDeclaration', 'ArrayError', 'Array']
+
+class ArrayDeclarationError(ListDeclarationError):
+    pass
+
+class ArrayDeclaration(ListDeclaration):
+    def __init__(self, **kwargs):
+        args = kwargs.setdefault('args', dict())
+        base_decl = args.get('base_declaration')
+
+        if base_decl is None:
+            raise ArrayDeclarationError('base_declaration cannot be None')
+
+        base_decl = ensure_declaration(base_decl)
+        elements = args.get('elements')
+
+        if elements is None:
+            elements = 0
+
+        args['base_declaration'] = base_decl
+        args['elements'] = elements
+        args['declarations'] = [base_decl.copy() for i in xrange(elements)]
+        
+        super(ArrayDeclaration, self).__init__(**kwargs)
+
+        self.set_arg('base_declaration', base_decl)
+        self.set_arg('elements', elements)
+
+    def set_elements(self, elements):
+        elem_arg = self.get_arg('elements')
+        
+        if elements == elem_arg:
+            return
+
+        self.set_arg('elements', elements)
+        
+        base_decl = self.get_arg('base_declaration')
+
+        if base_decl is None:
+            raise ArrayDeclarationError('base_declaration cannot be None')
+
+        if elements < elem_arg:
+            for i in range(elements, elem_arg):
+                self.remove_declaration(elements)
+        elif elements > elem_arg:
+            old_length = elem_arg
+            element_delta = elements - old_length
+
+            for i in range(element_delta):
+                self.append_declaration(base_decl.copy())
+
+    def get_elements(self):
+        return self.get_arg('elements')
 
 class ArrayError(ListError):
     pass
 
 class Array(List):
+    DECLARATION_CLASS = ArrayDeclaration
     BASE_DECLARATION = None
     ELEMENTS = 0
 
     def __init__(self, **kwargs):
         self.base_declaration = kwargs.setdefault('base_declaration', self.BASE_DECLARATION)
-
-        if self.base_declaration is None:
-            raise ArrayError('base declaration cannot be None')
-
-        self.base_declaration = ensure_declaration(self.base_declaration)
         self.elements = kwargs.setdefault('elements', self.ELEMENTS)
-
-        kwargs['declarations'] = [self.base_declaration.copy() for i in xrange(self.elements)]
 
         super(Array, self).__init__(**kwargs)
 
     def set_elements(self, elements):
-        self.elements = elements
-        # the rest is handled by __setattr__
-
-    def get_elements(self):
-        return self.elements
-
-    def parse_elements(self):
-        if self.elements == len(self.declarations):
-            return
-
         if self.is_bound():
             raise ArrayError('cannot resize bound array')
 
-        if self.elements < len(self.declarations):
-            for i in range(self.elements, len(self.declarations)):
-                self.remove_declaration(self.elements)
-        elif self.elements > len(self.declarations):
-            old_length = len(self.declarations)
-            element_delta = self.elements - old_length
+        self.declaration.set_elements(elements)
 
-            for i in range(element_delta):
-                self.append_declaration(self.base_declaration.copy())
-                            
-    def __setattr__(self, attr, value):
-        if attr == 'elements':
-            if 'elements' in self.__dict__:
-                self.__dict__['elements'] = value
-
-                if 'declaration' in self.__dict__ and not self.__dict__['declaration'] is None:
-                    self.__dict__['declaration'].set_arg('elements', value)
-
-                self.parse_elements()
-            else:
-                self.__dict__[attr] = value
-        else:
-            super(Array, self).__setattr__(attr, value)
+    def get_elements(self):
+        return self.declaration.get_elements()
 
     @classmethod
     def static_size(cls, **kwargs):
@@ -104,3 +122,5 @@ class Array(List):
             ELEMENTS = kwargs['elements']
 
         return SubclassedArray
+
+ArrayDeclaration.BASE_CLASS = Array
