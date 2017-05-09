@@ -121,7 +121,10 @@ class Block(ParanoiaAgent):
         return self.get_value()
 
     def __repr__(self):
-        return '<Block:0x%X/%d>' % (int(self.address), self.get_value())
+        if self.address is None:
+            return '<Block:NULL/%d>' % self.get_value()
+        else:
+            return '<Block:0x%X/%d>' % (int(self.address), self.get_value())
 
 class BlockLink(Block):
     SHIFT = 0
@@ -257,7 +260,7 @@ class BlockChain(ParanoiaAgent):
         if index < 0:
             index += len(self)
 
-        if index < 0 or index >= len(self):
+        if index < 0 or index >= self.size.byte_length():
             raise IndexError(index)
 
         return BlockLink(address=self.address.fork(index)

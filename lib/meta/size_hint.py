@@ -21,6 +21,7 @@ class SizeHintDeclaration(RegionDeclaration):
             raise SizeHintDeclarationError('both declaration_offset and field_name cannot be None')
         
     def resolve(self, **kwargs):
+        from paranoia.meta.array import ArrayDeclaration
         from paranoia.meta.mapping import MappingDeclaration
         from paranoia.meta.list import ListDeclaration
 
@@ -40,8 +41,14 @@ class SizeHintDeclaration(RegionDeclaration):
         target_decl = None
 
         if not field_name is None:
+            if not isinstance(parent_declaration, MappingDeclaration):
+                raise SizeHintError('parent declaration not a MappingDeclaration')
+            
             decl = parent_declaration.get_field(field_name)
         elif not declaration_offset is None:
+            if not isinstance(parent_declaration, ListDeclaration):
+                raise SizeHintError('parent declaration not a ListDeclaration')
+            
             decl = parent_declaration.get_arg('declarations')[declaration_offset]
             
         value = self.get_value(**kwargs)
@@ -53,11 +60,14 @@ class SizeHintDeclaration(RegionDeclaration):
             new_size = Size(bits=value)
             decl.set_size(new_size)
         elif action == 'set_elements':
+            if not isinstance(decl, ArrayDeclaration):
+                raise SizeHintError('declaration not an ArrayDeclaration')
+            
             decl.set_elements(value)
         elif isinstance(action, str):
             decl.set_arg(action, value)
         elif callable(action):
-            action(self, decl)
+            action(self, decl, value)
         else:
             raise SizeHintError('incompatible action')
 

@@ -42,14 +42,26 @@ class Declaration(ParanoiaAgent):
         if not isinstance(self.args, dict):
             raise DeclarationError('args must be a dictionary object')
 
-        self.instance = kwargs.setdefault('instance', None)
-
+        instance = kwargs.setdefault('instance', None)
+        self.set_instance(instance)
+            
     def instantiate(self, **kwargs):
         dict_merge(kwargs, self.args)
         kwargs['declaration'] = self
 
         self.instance = self.base_class(**kwargs)
         return self.instance
+
+    def set_instance(self, instance):
+        self.instance = instance
+
+        if instance is None:
+            return
+
+        self.set_arg('declaration', self)
+        
+        for arg in self.args:
+            setattr(self.instance, arg, self.args[arg])
 
     def get_arg(self, arg):
         if not arg in self.args:
@@ -70,4 +82,4 @@ class Declaration(ParanoiaAgent):
         return copied
 
     def __repr__(self):
-        return '<Declaration:%s>' % self.base_class.__name__
+        return '<Declaration:%s/%X>' % (self.base_class.__name__, id(self))

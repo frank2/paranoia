@@ -16,25 +16,24 @@ class ArrayDeclarationError(ListDeclarationError):
 class ArrayDeclaration(ListDeclaration):
     def __init__(self, **kwargs):
         args = kwargs.setdefault('args', dict())
-        base_decl = args.get('base_declaration')
+        base_class = kwargs.setdefault('base_class', None)
+
+        if base_class is None:
+            raise ArrayDeclarationError('base_class cannot be None')
+
+        base_decl = args.setdefault('base_declaration', base_class.BASE_DECLARATION)
 
         if base_decl is None:
             raise ArrayDeclarationError('base_declaration cannot be None')
 
         base_decl = ensure_declaration(base_decl)
-        elements = args.get('elements')
-
-        if elements is None:
-            elements = 0
+        elements = args.setdefault('elements', base_class.ELEMENTS)
 
         args['base_declaration'] = base_decl
         args['elements'] = elements
         args['declarations'] = [base_decl.copy() for i in xrange(elements)]
         
         super(ArrayDeclaration, self).__init__(**kwargs)
-
-        self.set_arg('base_declaration', base_decl)
-        self.set_arg('elements', elements)
 
     def set_elements(self, elements):
         elem_arg = self.get_arg('elements')

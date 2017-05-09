@@ -269,8 +269,6 @@ class Allocation(ParanoiaAgent):
         for i in xrange(back_size):
             padding_back.append(back_block.get_bit(i + active_bits, force))
 
-        print hex(back_addr), padding_back, back_block.get_value()
-
         bit_list = padding_front + bit_list + padding_back
         bytelist = list()
 
@@ -292,6 +290,9 @@ class Allocation(ParanoiaAgent):
         
         if size is None:
             size = self.size
+
+        if size == 0:
+            return
 
         if id_val is None:
             id_val = self.id

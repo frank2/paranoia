@@ -8,18 +8,14 @@ from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.base.size import Size
 from paranoia.meta.declaration import Declaration, ensure_declaration
 from paranoia.meta.region import Region, RegionDeclaration, RegionError, RegionDeclarationError
-from paranoia.meta.size_hint import SizeHint
+from paranoia.meta.size_hint import SizeHint, SizeHintDeclaration
 
 try:
     import __builtin__
 except ImportError: # python3
     import builtins as __builtin__
 
-__all__ = ['is_size_hint', 'ListDeclarationError', 'ListDeclaration', 'ListError'
-           ,'List']
-
-def is_size_hint(decl):
-    return issubclass(decl.base_class, SizeHint)
+__all__ = ['ListDeclarationError', 'ListDeclaration', 'ListError', 'List']
 
 class ListDeclarationError(RegionDeclarationError):
     pass
@@ -33,20 +29,6 @@ class ListDeclaration(RegionDeclaration):
             
         self.declaration_index = dict()
         self.map_declarations()
-        self.set_arg('size', self.declarative_size())
-
-    def size(self, **kwargs):
-        dict_merge(kwargs, self.args)
-
-        size = self.get_arg('size')
-
-        if size is None or int(size) == 0:
-            size = self.declarative_size(**kwargs)
-
-            if size is None or int(size) == 0:
-                size = self.base_class.static_size(**kwargs)
-
-        return size
 
     def declarative_size(self, **kwargs):
         dict_merge(kwargs, self.args)
@@ -63,14 +45,12 @@ class ListDeclaration(RegionDeclaration):
             shift = self.get_arg('shift')
 
         for decl in declarations:
-            offset = decl.align(offset, shift)
+            offset = decl.align(offset, shift) - shift
             offset += int(decl.size())
 
-        return Size(bits=offset)
+        return Size(bits=offset - shift)
               
     def map_declarations(self):
-        from paranoia.meta.size_hint import SizeHintDeclaration
-
         for id_val in self.subregions:
             self.remove_subregion(self.subregions[id_val])
 
@@ -86,8 +66,7 @@ class ListDeclaration(RegionDeclaration):
             self.declare_subregion(decl)
             self.declaration_index[id(decl)] = i
 
-            if isinstance(decl, SizeHintDeclaration):
-                decl.resolve()
+        self.set_size(self.declarative_size())
 
     def movement_deltas(self, index, init_delta):
         overlaps = self.get_arg('overlaps')
@@ -110,9 +89,9 @@ class ListDeclaration(RegionDeclaration):
             ident = reverse_offsets[offset]
                 
             if prior_delta is None:
-                deltas[offset] = index_decl.align(offset + init_delta, shift)
+                deltas[offset] = index_decl.align(offset + init_delta, shift) - shift
             else:
-                deltas[offset] = self.subregions[ident].align(offset + prior_delta, shift)
+                deltas[offset] = self.subregions[ident].align(offset + prior_delta, shift) - shift
                 
             prior_delta = deltas[offset] - offset
 
@@ -127,7 +106,7 @@ class ListDeclaration(RegionDeclaration):
 
         current_offset = self.subregion_offsets[id(decl)]
         current_index = self.declaration_index[id(decl)]
-        size_delta = new_size - decl.size()
+        size_delta = int(new_size) - int(decl.size())
 
         if size_delta == 0:
             return
@@ -166,7 +145,7 @@ class ListDeclaration(RegionDeclaration):
 
         current_offset = self.subregion_offsets[id(decl)]
         current_index = self.declaration_index[id(decl)]
-        size_delta = new_size - decl.size()
+        size_delta = int(new_size) - int(decl.size())
 
         if size_delta == 0:
             return
@@ -175,7 +154,7 @@ class ListDeclaration(RegionDeclaration):
         self.remove_subregion(decl) # detaches declaration from parent
             
         old_size = decl.size()
-        decl.set_size(new_size)
+        decl.set_arg('size', new_size)
 
         try:
             self.declare_subregion(decl, current_offset)
@@ -194,10 +173,8 @@ class ListDeclaration(RegionDeclaration):
             for offset in targets:
                 self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
 
-            new_list_size = self.declarative_size()
-
-            # region can now be resized
-            self.set_size(new_list_size)
+        # region can now be resized
+        self.set_size(self.declarative_size())
 
         if not decl.instance is None:
             decl.instance.size = new_size
@@ -238,9 +215,11 @@ class ListDeclaration(RegionDeclaration):
             prev_decl = declarations[index-1]
             prev_offset = self.subregion_offsets[id(prev_decl)]
             prev_size = prev_decl.size()
-            index = decl.align(prev_offset + int(prev_size), shift)
+            index = decl.align(prev_offset + int(prev_size), shift) - shift
             
         self.declare_subregion(decl, index)
+
+        self.set_size(self.declarative_size())
 
         return decl
 
@@ -311,14 +290,22 @@ class List(Region):
                 decl.set_size(parsed)
 
             if self.overlaps:
+                data = bit_data[:int(parsed)]
+            else:
+                data = bit_data[offset:offset+int(parsed)]
+
+            if isinstance(decl, SizeHintDeclaration):
+                decl.resolve(bit_data=data)
+
+            if self.overlaps:
                 if parsed > total_parsed:
                     total_parsed = int(parsed)
 
-                self.write_bits(bit_data[:int(parsed)], offset)
+                self.write_bits(data, offset)
             else:
                 total_parsed = offset + int(parsed)
                 
-                self.write_bits(bit_data[offset:offset+int(parsed)], offset)
+                self.write_bits(data, offset)
 
         self.flush()
 
@@ -369,7 +356,7 @@ class List(Region):
                     size = decl.size()
             else:
                 if not decl.size() == 0:
-                    size = decl.align(offset, shift) + decl.size()
+                    size = decl.align(offset, shift) + decl.size() - shift
                     
                 offset = int(size)
 
@@ -377,8 +364,6 @@ class List(Region):
 
     @classmethod
     def bit_parser(cls, **kwargs):
-        from paranoia.meta.size_hint import SizeHintDeclaration
-        
         size = 0
         overlap = kwargs.setdefault('overlaps', cls.OVERLAPS)
         shift = kwargs.setdefault('shift', cls.SHIFT)
@@ -400,6 +385,8 @@ class List(Region):
         else:
             bit_data = list()
 
+        offset = 0
+
         for decl in declarations:
             if overlap:
                 parsed = decl.bit_parser(bit_data=bit_data)
@@ -407,14 +394,15 @@ class List(Region):
                 if parsed > size:
                     size = parsed
             else:
-                size = decl.align(size, shift)
-                parsed = decl.bit_parser(bit_data=bit_data[size:])
+                offset = decl.align(offset, shift) - shift
+                parsed = decl.bit_parser(bit_data=bit_data[offset:])
+                size = offset + int(parsed)
                 
                 if isinstance(decl, SizeHintDeclaration):
                     decl.resolve(parent_declaration=declaration
-                                 ,bit_data=bit_data[size:])
+                                 ,bit_data=bit_data[offset:size])
 
-                size += parsed
+                offset = size
 
         return Size(bits=size)
 

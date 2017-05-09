@@ -95,6 +95,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         return size
 
+    def declarative_size(self, **kwargs):
+        return self.size(**kwargs)
+
     def bit_parser(self, **kwargs):
         dict_merge(kwargs, self.args)
 
@@ -402,8 +405,7 @@ class Region(BlockChain):
                 raise RegionError('both declaration and declaration_class cannot be None')
             
             self.declaration = self.declaration_class(base_class=self.__class__
-                                                      ,args=kwargs
-                                                      ,instance=self)
+                                                      ,args=kwargs)
             kwargs = self.declaration.args
         elif is_region(self.declaration):
             self.declaration = self.declaration.declare(**kwargs)
@@ -414,7 +416,7 @@ class Region(BlockChain):
         elif not issubclass(self.declaration.base_class, self.__class__):
             raise RegionError('declaration base_class mismatch')
 
-        self.declaration.instance = self
+        self.declaration.set_instance(self)
         dict_merge(kwargs, self.declaration.args)
 
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
@@ -422,6 +424,9 @@ class Region(BlockChain):
         self.parent_declaration = kwargs.setdefault('parent_declaration', self.PARENT_DECLARATION)
         self.shrink = kwargs.setdefault('shrink', self.SHRINK)
         self.size = kwargs.setdefault('size', self.SIZE)
+
+        if self.size is None or self.size == 0:
+            self.size == self.declaration.declarative_size()
 
         super(Region, self).__init__(**kwargs)
 
@@ -457,6 +462,10 @@ class Region(BlockChain):
         self.declaration.rebase(address, shift)
 
     def set_size(self, size):
+        if not self.init_finished:
+            super(Region, self).set_size(size)
+            return
+        
         self.declaration.set_size(size)
 
     def parse_bit_data(self, bit_data):
@@ -512,6 +521,10 @@ class Region(BlockChain):
     @classmethod
     def static_size(cls, **kwargs):
         return cls.SIZE
+
+    @classmethod
+    def static_value(cls, **kwargs):
+        raise RegionError('static_value not implemented')
     
     @classmethod
     def declare(cls, **kwargs):
@@ -524,7 +537,12 @@ class Region(BlockChain):
 
     @classmethod
     def bit_parser(cls, **kwargs):
-        return cls.static_size(**kwargs)
+        size = kwargs.setdefault('size', cls.SIZE)
+
+        if size is None or size == 0:
+            size = cls.static_size(**kwargs)
+
+        return size
 
     @classmethod
     def subclass(cls, **kwargs):
@@ -643,7 +661,9 @@ class NumericRegion(Region):
     @classmethod
     def static_value(cls, **kwargs):
         if 'bit_data' in kwargs:
-            links = map(lambda x: Block(value=x), bitlist_to_bytelist(kwargs['bit_data']))
+            bit_data = kwargs['bit_data']
+            bit_data += [0] * (8 - len(bit_data))
+            links = map(lambda x: Block(value=x), bitlist_to_bytelist(bit_data))
         elif 'link_data' in kwargs:
             links = map(lambda x: Block(value=x), kwargs['link_data'])
         elif 'block_data' in kwargs:
