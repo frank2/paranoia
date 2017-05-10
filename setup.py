@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name = 'paranoia'
-    ,version = '0.7.0'
+    ,version = '0.7.5'
     ,author = 'frank2'
     ,author_email = 'frank2@dc949.org'
     ,description = 'A data structure library.'
