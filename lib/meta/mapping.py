@@ -158,6 +158,7 @@ class MappingDeclaration(ListDeclaration):
         instance = super(MappingDeclaration, self).instantiate(**kwargs)
         instance.field_map = field_map
         instance.anon_map = anon_map
+        
         return instance
 
 class MappingError(ListError):

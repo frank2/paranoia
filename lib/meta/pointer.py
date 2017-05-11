@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 
 from paranoia.base import Address, Size
+from paranoia.base.event import *
 from paranoia.fundamentals import arch
 from paranoia.meta.declaration import ensure_declaration
-from paranoia.meta.region import RegionDeclaration, RegionError, NumericRegion
+from paranoia.meta.region import RegionDeclarationError, RegionDeclaration, RegionError, NumericRegion
 
-__all__ = ['PointerError', 'Pointer', 'LivePointer', 'OffsetError', 'Offset', 'LiveOffset']
+__all__ = ['PointerError', 'Pointer', 'LivePointerDeclarationError'
+           ,'LivePointerDeclaration', 'LivePointer', 'OffsetError', 'Offset'
+           ,'LiveOffset']
 
 class PointerError(RegionError):
     pass
@@ -103,37 +106,63 @@ class Pointer(NumericRegion):
 
         return CastedPointer
 
+class LivePointerDeclarationError(RegionDeclarationError):
+    pass
+
+class LivePointerDeclaration(RegionDeclaration):
+    def __init__(self, **kwargs):
+        super(LivePointerDeclaration, self).__init__(**kwargs)
+
+        args = kwargs.setdefault('args', dict())
+        target_decl = args.get('target_declaration')
+
+        if target_decl is None:
+            return
+
+        self.set_target_declaration(target_decl)
+
+    def set_target_declaration(self, target_decl):
+        if not isinstance(target_decl, RegionDeclaration):
+            raise LivePointerDeclarationError('target declaration must be a RegionDeclaration')
+        
+        self.set_arg('target_declaration', target_decl)
+        
+        class AddressEventWriter(NewAddressEvent):
+            pointer_decl = self
+            
+            def __call__(self, decl, address, shift):
+                self.pointer_decl.write_target_address(address)
+
+        self.event_object = AddressEventWriter()
+
+        target_decl.add_event(self.event_object)
+
+        if not target_decl.get_arg('address') is None:
+            self.write_target_address(target_decl.get_arg('address'))
+
+    def write_target_address(self, addr):
+        self.set_value(int(addr), True)
+
+    def __del__(self):
+        target_decl = self.get_arg('target_declaration')
+
+        if not target_decl is None:
+            target_decl.remove_event(self.event_object)
+        
 class LivePointer(Pointer):
+    DECLARATION_CLASS = LivePointerDeclaration
     TARGET_DECLARATION = None
 
     def __init__(self, **kwargs):
         self.target_declaration = kwargs.setdefault('target_declaration', self.TARGET_DECLARATION)
 
-        if self.target_declaration is None:
-            raise PointerError('no target declaration given')
-
-        if not isinstance(self.target_declaration, RegionDeclaration):
-            raise PointerError('target must be a RegionDeclaration instance')
-
         super(LivePointer, self).__init__(**kwargs)
 
-    def get_value(self, force=False):
-        addr = self.target_declaration.get_arg('address')
+    def set_target_declaration(self, target_decl):
+        self.declaration.set_target_declaration(target_decl)
 
-        if addr is None:
-            raise PointerError('target declaration has no address')
-        else:
-            value = int(addr)
-
-        self.set_value(value, force)
-
-        return value
-
-    def flush(self):
-        self.get_value()
+LivePointerDeclaration.BASE_CLASS = LivePointer
         
-        super(LivePointer, self).flush()
-
 class OffsetError(PointerError):
     pass
 
@@ -149,17 +178,7 @@ class Offset(NumericRegion):
         super(Offset, self).__init__(**kwargs)
 
     def memory_value(self):
-        decl = self.declaration
-
-        while not decl.get_arg('parent_declaration') is None:
-            decl = decl.get_arg('parent_declaration')
-
-        address = decl.get_arg('address')
-
-        if address is None:
-            raise OffsetError('no address in root declaration')
-
-        return address.allocation.id + self.get_value()
+        return self.address.allocation.id + self.get_value()
 
     def deref(self, casting_decl=None):
         address_value = self.memory_value()
@@ -181,46 +200,17 @@ class Offset(NumericRegion):
         memory_base = Address(offset=self.memory_value() + byte_offset)
         memory_base.write_bytes(byte_list)
 
+class LiveOffsetDeclaration(LivePointerDeclaration):
+    def write_target_address(self, address):
+        self.set_value(int(address) - address.allocation.id, True)
+
 class LiveOffset(Offset):
+    DECLARATION_CLASS = LiveOffsetDeclaration
     TARGET_DECLARATION = None
 
     def __init__(self, **kwargs):
         self.target_declaration = kwargs.setdefault('target_declaration', self.TARGET_DECLARATION)
 
-        if self.target_declaration is None:
-            raise OffsetError('no target declaration given')
-
-        if not isinstance(self.target_declaration, RegionDeclaration):
-            raise OffsetError('target must be a RegionDeclaration instance')
-
         super(LiveOffset, self).__init__(**kwargs)
 
-    def get_value(self, force=False):
-        decl = self.target_declaration
-        target_addr = decl.get_arg('address')
-
-        if target_addr is None:
-            raise OffsetError('target declaration has no address')
-
-        while not decl.get_arg('parent_declaration') is None:
-            decl = decl.get_arg('parent_declaration')
-
-        address = decl.get_arg('address')
-
-        if address is None:
-            raise PointerError('no address in root declaration')
-
-        addr = self.target_declaration.get_arg('address')
-        offset = int(target_addr) - addr.allocation.id
-
-        self.set_value(offset, force)
-
-        return offset
-
-    def flush(self):
-        if not self.init_finished:
-            return
-        
-        self.get_value()
-        
-        super(LiveOffset, self).flush()
+LiveOffsetDeclaration.BASE_CLASS = LiveOffset

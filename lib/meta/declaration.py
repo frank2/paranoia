@@ -47,7 +47,7 @@ class Declaration(ParanoiaAgent):
         self.events = kwargs.setdefault('events', self.EVENTS)
 
         if self.events is None:
-            self.events = set()
+            self.events = list()
 
         instance = kwargs.setdefault('instance', None)
         self.set_instance(instance)

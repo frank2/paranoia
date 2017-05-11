@@ -59,20 +59,26 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         else:
             self.instance.set_shift(shift)
 
+        self.trigger_event(NewShiftEvent, shift)
+
     def set_size(self, size):
         parent_decl = self.get_arg('parent_declaration')
         
         if not parent_decl is None and id(self) in parent_decl.subregions:
             parent_decl.resize_subregion(self, size)
-            return
-        
-        if not self.instance is None:
+        elif not self.instance is None:
             # call the BlockChain version of the function to prevent an infinite
             # loop
+            old_address = int(self.instance.address)
             BlockChain.set_size(self.instance, size)
-            return
+            new_address = int(self.instance.address)
 
-        self.set_arg('size', size)
+            if not old_address == new_address: # chain moved, rebase
+                self.rebase(self.instance.address, self.get_arg('shift'))
+        else:
+            self.set_arg('size', size)
+
+        self.trigger_event(NewSizeEvent, size)
 
     def is_bound(self):
         return self.get_arg('bind') and self.get_arg('init_finished')
@@ -126,6 +132,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             return self.instance.set_value(value, force)
 
         self.set_arg('value', value)
+
+        self.trigger_event(SetValueEvent, value)
 
     def rebase(self, new_base, new_shift):
         if not isinstance(new_base, Address):
@@ -241,6 +249,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             
         decl.set_arg('parent_declaration', self)
 
+        self.trigger_event(DeclareSubregionEvent, decl)
+
         return decl
 
     def remove_subregion(self, decl):
@@ -264,6 +274,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if 'shift' in decl.args:
             del decl.args['shift']
+
+        self.trigger_event(RemoveSubregionEvent, decl)
 
     def move_subregion(self, decl, new_offset):
         if not isinstance(decl, RegionDeclaration):
@@ -624,6 +636,8 @@ class NumericRegion(Region):
     def set_value(self, value, force=False):
         int_max = 2 ** int(self.size)
 
+        value_push = value
+
         if abs(value) >= int_max:
             raise RegionError('integer overflow')
 
@@ -657,6 +671,9 @@ class NumericRegion(Region):
 
         if not force and not self.buffer:
             self.flush()
+
+        self.declaration.set_arg('value', value_push)
+        self.declaration.trigger_event(SetValueEvent, value_push)
 
     def get_value(self, force=False):
         kwargs = dict()
