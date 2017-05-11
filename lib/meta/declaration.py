@@ -4,10 +4,10 @@ import copy
 import inspect
 
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.event import *
 from paranoia.fundamentals import dict_merge, align
 
-__all__ = ['DeclarationError', 'Declaration', 'DeclarationEventError', 'DeclarationEvent', 'SetPropertyEvent'
-           ,'ensure_declaration']
+__all__ = ['DeclarationError', 'Declaration', 'ensure_declaration']
 
 class DeclarationError(ParanoiaError):
     pass
@@ -25,6 +25,7 @@ def ensure_declaration(obj):
 class Declaration(ParanoiaAgent):
     BASE_CLASS = None
     ARGS = None
+    EVENTS = None
 
     def __init__(self, **kwargs):
         self.base_class = kwargs.setdefault('base_class', self.BASE_CLASS)
@@ -46,16 +47,60 @@ class Declaration(ParanoiaAgent):
         self.events = kwargs.setdefault('events', self.EVENTS)
 
         if self.events is None:
-            self.events = dict()
+            self.events = set()
 
         instance = kwargs.setdefault('instance', None)
         self.set_instance(instance)
+
+    def has_event(self, event):
+        if not isinstance(event, Event):
+            raise DeclarationError('event must be an Event')
+
+        return event in self.events
+
+    def add_event(self, event):
+        if not isinstance(event, Event):
+            raise DeclarationError('event must be an Event')
+
+        if self.has_event(event):
+            return
+        
+        self.events.append(event)
+
+    def insert_event(self, index, event):
+        if not isinstance(event, Event):
+            raise DeclarationError('event must be an Event')
+
+        if self.has_event(event):
+            return
+        
+        self.events.insert(index, event)
+        
+    def remove_event(self, event):
+        if not isinstance(event, Event):
+            raise DeclarationError('event must be an Event')
+
+        if not self.has_event(event):
+            raise DeclarationError('no such event')
+        
+        self.events.remove(event)
+
+    def trigger_event(self, event_class, *args):
+        if not issubclass(event_class, Event):
+            raise DeclarationError('event class must be an Event class')
+
+        events_available = filter(lambda x: isinstance(x, event_class), self.events)
+        
+        for event in events_available:
+            event(self, *args)
             
     def instantiate(self, **kwargs):
         dict_merge(kwargs, self.args)
         kwargs['declaration'] = self
 
         self.instance = self.base_class(**kwargs)
+        self.trigger_event(InstantiateEvent, self.instance, kwargs)
+        
         return self.instance
 
     def set_instance(self, instance):
@@ -69,56 +114,6 @@ class Declaration(ParanoiaAgent):
         for arg in self.args:
             setattr(self.instance, arg, self.args[arg])
 
-    def has_event_class(self, event_class):
-        if inspect.isclass(event_class) and issubclass(event_class, DeclarationEvent):
-            event_class = event_class.EVENT_CLASS
-            
-        return event_class in self.events
-
-    def has_event(self, event):
-        if not isinstance(event, DeclarationEvent):
-            raise DeclarationError('event must be a DeclarationEvent')
-
-        if not self.has_event_class(event.event_class)
-            return False
-        
-        event_list = self.events[event_class]
-
-        return event in event_list
-
-    def add_event(self, event):
-        if not isinstance(event, DeclarationEvent):
-            raise DeclarationError('event must be a DeclarationEvent')
-
-        if self.has_event(event):
-            return
-        
-        event_list = self.events.setdefault(event.event_class, list())
-        event_list.append(event)
-
-    def remove_event(self, event):
-        if not isinstance(event, DeclarationEvent):
-            raise DeclarationError('event must be a DeclarationEvent')
-
-        if not self.has_event(event)
-            raise DeclarationError('no such event')
-        
-        event_list = self.events[event.event_class]
-        event_list.remove(event)
-
-        if len(event_list) == 0:
-            del self.events[arg]
-
-    def trigger_event(self, event_class):
-        if not self.has_event_class(event_class):
-            raise DeclarationError('no such event class to trigger')
-
-        if inspect.isclass(event_class) and issubclass(event_class, DeclarationEvent):
-            event_class = event_class.EVENT_CLASS
-
-        for event in self.events[event_class]:
-            event(self)
-
     def get_arg(self, arg):
         if not arg in self.args:
             return getattr(self.base_class, arg.upper(), None)
@@ -131,8 +126,7 @@ class Declaration(ParanoiaAgent):
         if not self.instance is None and not from_instance:
             setattr(self.instance, arg, value)
 
-        if self.has_event_class(SetPropertyEvent):
-            self.trigger_event(SetPropertyEvent)
+        self.trigger_event(SetPropertyEvent, arg, value)
 
     def copy(self):
         copied = self.__class__(base_class=self.base_class
@@ -142,21 +136,3 @@ class Declaration(ParanoiaAgent):
 
     def __repr__(self):
         return '<Declaration:%s/%X>' % (self.base_class.__name__, id(self))
-
-class DeclarationEventError(DeclarationError):
-    pass
-
-class DeclarationEvent(ParanoiaAgent):
-    EVENT_CLASS = None
-    
-    def __init__(self, **kwargs):
-        self.event_class = kwargs.setdefault('event_class', self.EVENT_CLASS)
-
-        if self.event_class is None:
-            raise DeclarationEventError('event_class cannot be None')
-
-    def __call__(self, event_decl):
-        raise DeclarationEventError('__call__ not implemented')
-
-class SetPropertyEvent(DeclarationEvent):
-    EVENT_CLASS = "set_property"

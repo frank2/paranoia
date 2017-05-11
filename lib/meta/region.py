@@ -6,6 +6,7 @@ import sys
 
 from paranoia.base.address import Address
 from paranoia.base.block import Block, BlockChain
+from paranoia.base.event import *
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.meta.declaration import Declaration, DeclarationError
 from paranoia.fundamentals import *
@@ -48,7 +49,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             BlockChain.set_address(self.instance, address)
 
         if not shift is None:
-            self.set_shift(shift)    
+            self.set_shift(shift)
+
+        self.trigger_event(NewAddressEvent, address, shift)
 
     def set_shift(self, shift):
         if self.instance is None:
