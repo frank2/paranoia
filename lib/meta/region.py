@@ -518,6 +518,10 @@ class Region(BlockChain):
 
         super(Region, self).__setattr__(attr, value)
 
+    def __del__(self):
+        self.declaration.instance = None
+        super(Region, self).__del__()
+
     @classmethod
     def static_size(cls, **kwargs):
         return cls.SIZE
@@ -658,6 +662,186 @@ class NumericRegion(Region):
         
         return self.static_value(**kwargs)
 
+    def __int__(self):
+        return self.get_value()
+
+    def __add__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('addend must be an int or another NumericRegion')
+
+        return self.get_value() + other
+
+    def __radd__(self, other):
+        return self + other
+
+    def __iadd__(self, other):
+        self.set_value(self + other)
+
+    def __sub__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('subtractor must be an int or another NumericRegion')
+
+        return self.get_value() - other
+
+    def __rsub__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('subtractor must be an int or another NumericRegion')
+
+        return other - self.get_value()
+
+    def __isub__(self, other):
+        self.set_value(self - other)
+
+    def __mul__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('multiplicant must be an int or another NumericRegion')
+
+        return self.get_value() * other
+
+    def __rmul__(self, other):
+        return self * other
+
+    def __imul__(self, other):
+        self.set_value(self * other)
+
+    def __div__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('divisor must be an int or another NumericRegion')
+
+        return self.get_value() / other
+
+    def __rdiv__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('divisor must be an int or another NumericRegion')
+
+        return other / self.get_value()
+
+    def __idiv__(self, other):
+        self.set_value(self / other)
+
+    def __mod__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('modulus must be an int or another NumericRegion')
+
+        return self.get_value() % other
+
+    def __rmod__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('modulus must be an int or another NumericRegion')
+
+        return other % self.get_value()
+
+    def __imod__(self, other):
+        self.set_value(self % other)
+
+    def __pow__(self, exponent):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('exponent must be an int or another NumericRegion')
+
+        return self.get_value() ** exponent
+
+    def __rpow__(self, exponent):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('exponent must be an int or another NumericRegion')
+
+        return exponent ** self.get_value()
+
+    def __ipow__(self, exponent):
+        self.set_value(self ** exponent)
+
+    def __lshift__(self, shift):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('shift must be an int or another NumericRegion')
+
+        return self.get_value() << shift
+
+    def __rlshift__(self, shift):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('shift must be an int or another NumericRegion')
+
+        return shift << self.get_value()
+
+    def __ilshift__(self, shift):
+        self.set_value((self.get_value() << shift) & ((2 ** int(self.size)) - 1))
+
+    def __rshift__(self, shift):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('shift must be an int or another NumericRegion')
+
+        return self.get_value() >> shift
+
+    def __rrshift__(self, shift):
+        if not isinstance(exponent, (int, NumericRegion)):
+            raise RegionError('shift must be an int or another NumericRegion')
+
+        return shift >> self.get_value()
+
+    def __irshift__(self, shift):
+        self.set_value(self.get_value() >> shift)
+
+    def __and__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return self.get_value() & other
+
+    def __rand__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return other & self.get_value()
+
+    def __iand__(self, other):
+        self.set_value(self & other)
+
+    def __or__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return self.get_value() | other
+
+    def __ror__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return other | self.get_value()
+
+    def __ior__(self, other):
+        self.set_value(self | other)
+
+    def __xor__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return self.get_value() ^ other
+
+    def __rxor__(self, other):
+        if not isinstance(other, (int, NumericRegion)):
+            raise RegionError('logical value must be an int or another NumericRegion')
+
+        return other ^ self.get_value()
+
+    def __ixor__(self, other):
+        self.set_value(self ^ other)
+
+    def __neg__(self):
+        return -self.get_value()
+
+    def __pos__(self):
+        return +self.get_value()
+
+    def __abs__(self):
+        return abs(self.get_value())
+
+    def __invert__(self):
+        return ~self.get_value()
+
+    def __oct__(self):
+        return oct(self.get_value())
+
+    def __hex__(self):
+        return hex(self.get_value())
+    
     @classmethod
     def static_value(cls, **kwargs):
         if 'bit_data' in kwargs:
