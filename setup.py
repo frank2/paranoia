@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 
 from setuptools import setup
+import unittest
+
+def unit_tests():
+    loader = unittest.TestLoader()
+    test_suite = loader.discover('test', pattern='test_*.py')
+    return test_suite
 
 setup(
     name = 'paranoia'
@@ -13,6 +19,7 @@ setup(
     ,url = 'https://github.com/frank2/paranoia'
     ,package_dir = {'paranoia': 'lib'}
     ,packages = ['paranoia', 'paranoia.base', 'paranoia.meta', 'paranoia.types']
+    ,test_suite = 'setup.unit_tests'
     ,long_description = '''PARANOiA, named after the series of DDR songs, is a library for data structures
 and general manipulation of binary and executable data. It is capable of creating dynamic structures
 that can be resized based on elements given and comes with a more flexible interface for creating

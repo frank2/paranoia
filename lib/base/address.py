@@ -61,6 +61,13 @@ class Address(ParanoiaAgent):
         else:
             self.offset = value
 
+    def valid(self, inclusive=False):
+        # address is only valid if it is backed by an allocation
+        if self.allocation is None:
+            return False
+
+        return self.allocation.in_range(int(self), inclusive)
+
     def fork(self, offset):
         return self.allocation.address(self.offset+offset)
 
