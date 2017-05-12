@@ -79,14 +79,12 @@ class ListDeclaration(RegionDeclaration):
         index_offset = self.subregion_offsets[id(index_decl)]
         current_offsets = filter(lambda x: x[0] >= index_offset if init_delta > 0 else x[0] > index_offset, self.subregion_ranges())
         deltas = dict()
-        # reverse offsets are okay because we don't overlap
-        reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
         prior_delta = None
         shift = self.get_arg('shift')
 
         for offset in current_offsets:
             offset, size = offset
-            ident = reverse_offsets[offset]
+            ident = self.reverse_offsets[offset][0]
                 
             if prior_delta is None:
                 deltas[offset] = index_decl.align(offset + init_delta, shift) - shift
@@ -125,10 +123,11 @@ class ListDeclaration(RegionDeclaration):
             targets = deltas.keys()
             targets.sort()
             targets.reverse()
-            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
         
             for offset in targets:
-                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+                ident = self.reverse_offsets[offset][0]
+                rev_decl = self.subregions[ident]
+                self.move_subregion(rev_decl, deltas[offset])
 
         # resize_subregion will handle the other case, where the targets need to be moved *before*
         # resize is called on the list object
@@ -167,11 +166,11 @@ class ListDeclaration(RegionDeclaration):
             deltas = self.movement_deltas(current_index, size_delta)
             targets = deltas.keys()
             targets.sort()
-
-            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
         
             for offset in targets:
-                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+                ident = self.reverse_offsets[offset][0]
+                rev_decl = self.subregions[ident]
+                self.move_subregion(rev_decl, deltas[offset])
 
         # region can now be resized
         self.set_size(self.declarative_size())
@@ -199,10 +198,11 @@ class ListDeclaration(RegionDeclaration):
             targets = deltas.keys()
             targets.sort()
             targets.reverse()
-            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
 
             for offset in targets:
-                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+                ident = self.reverse_offsets[offset][0]
+                rev_decl = self.subregions[ident]
+                self.move_subregion(rev_decl, deltas[offset])
 
         self.declaration_index[id(decl)] = index
 
@@ -243,10 +243,11 @@ class ListDeclaration(RegionDeclaration):
         if not deltas is None:
             targets = deltas.keys()
             targets.sort()
-            reverse_offsets = dict(map(lambda x: x[::-1], self.subregion_offsets.items()))
             
             for offset in targets:
-                self.move_subregion(self.subregions[reverse_offsets[offset]], deltas[offset])
+                ident = self.reverse_offsets[offset][0]
+                rev_decl = self.subregions[ident]
+                self.move_subregion(rev_decl, deltas[offset])
 
         self.set_size(self.declarative_size())
 

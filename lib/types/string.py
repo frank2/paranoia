@@ -2,8 +2,9 @@
 
 import ctypes
 
-from paranoia.fundamentals import bitlist_to_bytelist
+from paranoia.fundamentals import align, bitlist_to_bytelist
 from paranoia.meta.array import Array, ArrayError
+from paranoia.meta.declaration import ensure_declaration
 from paranoia.types.char import Char
 from paranoia.types.wchar import Wchar
 
@@ -15,50 +16,58 @@ class StringError(ArrayError):
 class String(Array):
     ZERO_TERMINATED = True
     BASE_DECLARATION = Char
-    ELEMENTS = 1 # there's always, at least, a null byte
+    ELEMENTS = 0
 
     def __init__(self, **kwargs):
         self.zero_terminated = kwargs.setdefault('zero_terminated', self.ZERO_TERMINATED)
-        self.bind = kwargs.setdefault('bind', self.BIND)
 
-        if not self.bind and not self.zero_terminated:
-            raise StringError('cannot have an unbound string with no zero termination')
+        self.elements = kwargs.setdefault('elements', self.ELEMENTS)
+
+        if self.zero_terminated:
+            self.elements += 1
+            kwargs['elements'] = self.elements
 
         Array.__init__(self, **kwargs)
 
-    def parse_data(self, data):
+    def parse_bit_data(self, data):
+        parsed = self.bit_parser(bit_data=data)
+
         if not self.is_bound():
-            self.elements = len(data)+int(self.zero_terminated)
+            self.set_elements(int(parsed.byte_length() / self.base_declaration.size().byte_length()))
+            
+        self.write_bits(data[:int(parsed)])
 
-        for i in xrange(len(data)):
-            self[i].set_char_value(data[i])
+        if not self.zero_terminated:
+            zeros = int(parsed - self.elements * self.base_declaration.size())
 
-        if self.zero_terminated:
-            self[len(data)].set_value(0)
+            if not zeros == 0:
+                zero_list = [0] * zeros
+                self.write_bits(zero_list, int(parsed))
 
+        return parsed
+        
     def parse_memory(self):
-        if self.is_bound():
-            maximum = self.elements - int(self.zero_terminated)
+        if not self.zero_terminated:
+            maximum = self.elements
         else:
-            self.elements = 1
+            self.set_elements(1)
             maximum = None
-
-        chars = list()
+            
         index = 0
 
         while maximum is None or index < maximum:
-            peek = self[index].get_char_value()
+            char_obj = self[index]
+            peek = char_obj.get_char_value()
 
-            if ord(peek) == 0:
+            if self.zero_terminated and ord(peek) == 0:
                 break
 
-            chars.append(peek)
             index += 1
 
             if not self.is_bound():
-                self.elements += 1
+                self.set_elements(index)
 
-        return ''.join(chars)
+        return self.parse_block_data(self.read_blocks())
         
     def get_value(self):
         if issubclass(self.base_declaration.base_class, Char):
@@ -69,7 +78,7 @@ class String(Array):
             raise StringError('unknown base character type')
 
     def set_value(self, string):
-        self.parse_data(string)
+        self.parse_link_data(string)
 
     def __str__(self):
         result = list()
@@ -96,6 +105,54 @@ class String(Array):
             result.append(c)
 
         return u''.join(result)
+
+    @classmethod
+    def bit_parser(cls, **kwargs):
+        if 'bit_data' in kwargs:
+            bit_data = kwargs['bit_data']
+            bit_data += [0] * (8 - len(bit_data))
+            links = bitlist_to_bytelist(bit_data)
+        elif 'link_data' in kwargs:
+            if isinstance(kwargs['link_data'], str):
+                links = map(ord, kwargs['link_data'])
+            else:
+                links = kwargs['link_data']
+        elif 'block_data' in kwargs:
+            bit_data = bytelist_to_bitlist(kwargs['block_data'])
+            shift = kwargs.setdefault('shift', cls.SHIFT)
+            bit_data = bit_data[shift:]
+            links = bitlist_to_bytelist(bit_data)
+        else:
+            raise RegionError('no data to parse')
+
+        zero_terminated = kwargs.setdefault('zero_terminated', cls.ZERO_TERMINATED)
+        bound = kwargs.setdefault('bound', cls.BOUND)
+        elements = kwargs.setdefault('elements', cls.ELEMENTS)
+        base_declaration = kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
+        base_declaration = ensure_declaration(base_declaration)
+
+        if not zero_terminated:
+            maximum = elements
+        
+        chars = list()
+
+        while len(links):
+            value = base_declaration.base_class.static_value(link_data=links)
+            chars.append(value)
+    
+        if not zero_terminated:
+            return len(chars[:maximum])*base_declaration.size()
+
+        zero_index = 0
+
+        for i in xrange(len(chars)):
+            char = chars[i]
+            
+            if char == 0:
+                zero_index = i
+                break
+            
+        return len(chars[:zero_index+1])*base_declaration.size()
 
     @classmethod
     def subclass(cls, **kwargs):

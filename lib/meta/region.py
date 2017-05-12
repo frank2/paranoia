@@ -41,6 +41,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         self.subregions = dict()
         self.subregion_offsets = dict()
+        self.reverse_offsets = dict()
 
     def set_address(self, address, shift=None):
         if self.instance is None:
@@ -226,6 +227,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
+        self.reverse_offsets.setdefault(bit_offset, list()).append(id(decl))
 
         if bit_offset+int(decl.size()) > int(self.size()):
             try:
@@ -233,6 +235,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             except Exception as e:
                 del self.subregions[id(decl)]
                 del self.subregion_offsets[id(decl)]
+                self.reverse_offsets[bit_offset].remove(id(decl))
                 raise e
 
         if not decl.get_arg('address') is None:
@@ -259,13 +262,21 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if not self.has_subregion(decl):
             raise RegionDeclarationError('no subregion found')
-        
+
+        self.trigger_event(RemoveSubregionEvent, decl)
+
         if not decl.instance is None:
             decl.instance.write_bits([0] * int(decl.size()))
 
+        offset = self.subregion_offsets[id(decl)]
+        self.reverse_offsets[offset].remove(id(decl))
+
+        if len(self.reverse_offsets[offset]) == 0:
+            del self.reverse_offsets[offset]
+            
         del self.subregion_offsets[id(decl)]
         del self.subregions[id(decl)]
-
+        
         if 'parent_declaration' in decl.args:
             del decl.args['parent_declaration']
 
@@ -274,8 +285,6 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if 'shift' in decl.args:
             del decl.args['shift']
-
-        self.trigger_event(RemoveSubregionEvent, decl)
 
     def move_subregion(self, decl, new_offset):
         if not isinstance(decl, RegionDeclaration):
@@ -450,9 +459,7 @@ class Region(BlockChain):
         value = kwargs.setdefault('value', self.VALUE)
         parse_memory = kwargs.setdefault('parse_memory', self.PARSE_MEMORY)
 
-        if not value is None:
-            self.set_value(value)
-        elif 'bit_data' in kwargs:
+        if 'bit_data' in kwargs:
             self.parse_bit_data(kwargs['bit_data'])
         elif 'link_data' in kwargs:
             self.parse_link_data(kwargs['link_data'])
@@ -460,6 +467,8 @@ class Region(BlockChain):
             self.parse_block_data(kwargs['block_data'])
         elif parse_memory:
             self.parse_memory()
+        elif not value is None:
+            self.set_value(value)
 
         self.init_finished = True
 
@@ -489,7 +498,7 @@ class Region(BlockChain):
         if parsed > self.size:
             self.set_size(parsed)
 
-        self.write_bits(bit_data[:parsed])
+        self.write_bits(bit_data[:int(parsed)])
         self.flush()
 
         return parsed
@@ -516,7 +525,7 @@ class Region(BlockChain):
         for block in self.block_iterator():
             block_bytes.append(block.get_value(force=True))
 
-        self.parse_block_data(block_bytes)
+        return self.parse_block_data(block_bytes)
 
     def set_value(self, value, force=False):
         raise RegionError('set_value not implemented')
