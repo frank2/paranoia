@@ -64,10 +64,10 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
     def set_size(self, size):
         parent_decl = self.get_arg('parent_declaration')
+
+        old_size = self.get_arg('size')
         
-        if not parent_decl is None and id(self) in parent_decl.subregions:
-            parent_decl.resize_subregion(self, size)
-        elif not self.instance is None:
+        if not self.instance is None:
             # call the BlockChain version of the function to prevent an infinite
             # loop
             old_address = int(self.instance.address)
@@ -79,8 +79,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         else:
             self.set_arg('size', size)
 
-        self.trigger_event(NewSizeEvent, size)
-
+        self.trigger_event(NewSizeEvent, old_size, size)
     def is_bound(self):
         return self.get_arg('bind') and self.get_arg('init_finished')
 
@@ -238,7 +237,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 self.reverse_offsets[bit_offset].remove(id(decl))
                 raise e
 
-        if not decl.get_arg('address') is None:
+        if not self.get_arg('address') is None:
             new_base = self.bit_offset_to_base(bit_offset, decl.get_arg('alignment'))
         else:
             new_base = None
@@ -693,6 +692,9 @@ class NumericRegion(Region):
 
     def __int__(self):
         return self.get_value()
+
+    def __cmp__(self, other):
+        return cmp(self.get_value(), int(other))
 
     def __add__(self, other):
         if not isinstance(other, (int, NumericRegion)):

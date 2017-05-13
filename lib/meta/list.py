@@ -5,6 +5,7 @@ import inspect
 
 from paranoia.fundamentals import *
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.event import *
 from paranoia.base.size import Size
 from paranoia.meta.declaration import Declaration, ensure_declaration
 from paranoia.meta.region import Region, RegionDeclaration, RegionError, RegionDeclarationError
@@ -49,24 +50,6 @@ class ListDeclaration(RegionDeclaration):
             offset += int(decl.size())
 
         return Size(bits=offset - shift)
-              
-    def map_declarations(self):
-        for id_val in self.subregions:
-            self.remove_subregion(self.subregions[id_val])
-
-        declarations = self.get_arg('declarations')
-        declarations = map(ensure_declaration, declarations)
-        self.set_arg('declarations', declarations)
-        
-        shift = self.get_arg('shift')
-
-        for i in xrange(len(declarations)):
-            decl = declarations[i]
-
-            self.declare_subregion(decl)
-            self.declaration_index[id(decl)] = i
-
-        self.set_size(self.declarative_size())
 
     def movement_deltas(self, index, init_delta):
         overlaps = self.get_arg('overlaps')
@@ -216,6 +199,15 @@ class ListDeclaration(RegionDeclaration):
             prev_offset = self.subregion_offsets[id(prev_decl)]
             prev_size = prev_decl.size()
             index = decl.align(prev_offset + int(prev_size), shift) - shift
+
+        class ListMemberResizeEvent(NewSizeEvent):
+            list_object = self
+            
+            def __call__(self, decl, old_size, new_size):
+                if not self.list_object.declarative_size() == self.list_object.size:
+                    self.list_object.set_size(self.list_object.declarative_size())
+
+        decl.add_event(ListMemberResizeEvent())
             
         self.declare_subregion(decl, index)
 
@@ -271,8 +263,8 @@ class List(Region):
         self.declarations = kwargs.setdefault('declarations', self.DECLARATIONS)
 
         if not self.declarations is None and self.declarations == self.DECLARATIONS:
-            self.declarations = map(Declaration.copy, self.declarations)
-            kwargs['declarations'] = declarations
+            self.declarations = map(Declaration.copy, map(ensure_declaration, self.declarations))
+            kwargs['declarations'] = self.declarations
         
         super(List, self).__init__(**kwargs)
 

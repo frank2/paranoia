@@ -30,7 +30,7 @@ class NewShiftEvent(Event):
         raise NotImplementedError
 
 class NewSizeEvent(Event):
-    def __call__(self, decl, size):
+    def __call__(self, decl, old_size, new_size):
         raise NotImplementedError
 
 class SetValueEvent(Event):

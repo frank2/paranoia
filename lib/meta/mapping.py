@@ -16,8 +16,10 @@ class MappingDeclaration(ListDeclaration):
     def __init__(self, **kwargs):
         super(MappingDeclaration, self).__init__(**kwargs)
 
-        args = kwargs.setdefault('args', dict())
-        fields = args.get('fields')
+        fields = self.get_arg('fields')
+
+        if fields is None:
+            fields = self.base_class.FIELDS
 
         if fields is None:
             fields = list()
@@ -206,6 +208,16 @@ class Mapping(List):
     def __setitem__(self, key, value):
         self.get_field(key).set_value(value)
 
+    def __contains__(self, key):
+        return key in self.field_map or key in self.anon_map
+
+    def __iter__(self):
+        for field in self.field_map:
+            yield field
+
+        for field in self.anon_map:
+            yield field
+
     @classmethod
     def static_size(cls, **kwargs):
         fields = kwargs.setdefault('fields', cls.FIELDS)
@@ -228,3 +240,5 @@ class Mapping(List):
             FIELDS = kwargs['fields']
 
         return SubclassedMapping
+
+MappingDeclaration.BASE_CLASS = Mapping

@@ -213,4 +213,7 @@ class LiveOffset(Offset):
 
         super(LiveOffset, self).__init__(**kwargs)
 
+    def set_target_declaration(self, target_decl):
+        self.declaration.set_target_declaration(target_decl)
+
 LiveOffsetDeclaration.BASE_CLASS = LiveOffset

@@ -126,7 +126,6 @@ class String(Array):
             raise RegionError('no data to parse')
 
         zero_terminated = kwargs.setdefault('zero_terminated', cls.ZERO_TERMINATED)
-        bound = kwargs.setdefault('bound', cls.BOUND)
         elements = kwargs.setdefault('elements', cls.ELEMENTS)
         base_declaration = kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
         base_declaration = ensure_declaration(base_declaration)
@@ -139,6 +138,7 @@ class String(Array):
         while len(links):
             value = base_declaration.base_class.static_value(link_data=links)
             chars.append(value)
+            links = links[base_declaration.size().byte_length():]
     
         if not zero_terminated:
             return len(chars[:maximum])*base_declaration.size()
