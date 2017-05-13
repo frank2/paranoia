@@ -66,7 +66,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         parent_decl = self.get_arg('parent_declaration')
 
         old_size = self.get_arg('size')
-        
+
         if not self.instance is None:
             # call the BlockChain version of the function to prevent an infinite
             # loop
@@ -78,8 +78,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 self.rebase(self.instance.address, self.get_arg('shift'))
         else:
             self.set_arg('size', size)
-
+        
         self.trigger_event(NewSizeEvent, old_size, size)
+
     def is_bound(self):
         return self.get_arg('bind') and self.get_arg('init_finished')
 
@@ -229,14 +230,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.reverse_offsets.setdefault(bit_offset, list()).append(id(decl))
 
         if bit_offset+int(decl.size()) > int(self.size()):
-            try:
-                self.accomodate_subregion(decl, decl.size())
-            except Exception as e:
-                del self.subregions[id(decl)]
-                del self.subregion_offsets[id(decl)]
-                self.reverse_offsets[bit_offset].remove(id(decl))
-                raise e
-
+            raise RegionDeclarationError('declaration exceeds region size')
+        
         if not self.get_arg('address') is None:
             new_base = self.bit_offset_to_base(bit_offset, decl.get_arg('alignment'))
         else:
@@ -250,6 +245,18 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             decl.set_shift(new_shift)
             
         decl.set_arg('parent_declaration', self)
+
+        resize_event = self.get_arg('resize_event')
+
+        if inspect.isclass(resize_event) and issubclass(resize_event, NewSizeEvent):
+            new_event = resize_event()
+            self.set_arg('resize_event', new_event)
+            resize_event = new_event
+
+        if not isinstance(resize_event, NewSizeEvent):
+            raise RegionDeclarationError('resize event must be a NewSizeEvent')
+
+        decl.add_event(resize_event)
 
         self.trigger_event(DeclareSubregionEvent, decl)
 
@@ -285,6 +292,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if 'shift' in decl.args:
             del decl.args['shift']
 
+        decl.remove_event(self.get_arg('resize_event'))
+
     def move_subregion(self, decl, new_offset):
         if not isinstance(decl, RegionDeclaration):
             raise RegionDeclarationError('decl must be a Declaration object')
@@ -296,69 +305,90 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if new_offset == current_offset:
             return
-
+        
         if not decl.instance is None:
             data = decl.instance.read_bits()
+            decl.instance.write_bits([0] * int(decl.size()))
         else:
             data = None
-        
-        self.remove_subregion(decl)
-        self.declare_subregion(decl, new_offset)
+
+        self.reverse_offsets[current_offset].remove(id(decl))
+
+        if len(self.reverse_offsets[current_offset]) == 0:
+            del self.reverse_offsets[current_offset]
+
+        if not self.get_arg('address') is None:
+            new_base = self.bit_offset_to_base(new_offset, decl.get_arg('alignment'))
+            new_shift = self.bit_offset_to_shift(new_offset, decl.get_arg('alignment'))
+        else:
+            new_base = None
+            new_shift = None
+
+        self.subregion_offsets[id(decl)] = new_offset
+        self.reverse_offsets.setdefault(new_offset, list()).append(id(decl))
+
+        if not new_base is None:
+            decl.rebase(new_base, new_shift)
 
         if data:
             decl.instance.write_bits(data)
 
-    def accomodate_subregion(self, decl, new_size):
+        self.trigger_event(MoveSubregionEvent, current_offset, new_offset)
+        
+    def push_subregions(self, decl, delta, include=False):
         if not isinstance(decl, RegionDeclaration):
-            raise RegionDeclarationError('decl must be a RegionDeclaration object')
+            raise RegionDeclarationError('decl must be a Declaration object')
 
         if not self.has_subregion(decl):
             raise RegionDeclarationError('subregion not found')
 
-        if not isinstance(new_size, Size):
-            raise RegionDeclarationError('size must be a Size instance')
-
-        current_offset = self.subregion_offsets[id(decl)]
-
-        if self.in_subregion(current_offset, new_size, True):
-            raise RegionDeclarationError('accomodation overwrites another region')
-
-        new_size = current_offset + int(new_size)
-        shrink = self.get_arg('shrink')
-
-        if new_size <= int(self.size) and not shrink:
+        if self.get_arg('overlaps'):
             return
 
-        self.set_size(Size(bits=new_size))
+        decl_offset = self.subregion_offsets[id(decl)]
+        move_ops = list()
+        shift = self.get_arg('shift')
+        shrink = self.get_arg('shrink')
+        ranges = self.subregion_ranges()
+        index = 0
 
-    def resize_subregion(self, decl, new_size):
-        if not isinstance(decl, declaration.Declaration):
-            raise RegionError('decl must be a Declaration object')
+        for index in xrange(len(ranges)):
+            if index > 0 and ranges[index-1][0] == decl_offset:
+                break
 
-        if not self.has_subregion(decl):
-            raise RegionError('subregion not found')
+        new_ranges = {index-1: (decl_offset, ranges[index-1][1] + delta)}
 
-        if not isinstance(new_size, Size):
-            raise RegionError('size must be a Size object')
+        if include:
+            move_ops.append((decl, decl_offset+delta))
 
-        self.accomodate_subregion(decl, new_size)
+        while index < len(ranges):
+            prev_range = new_ranges[index-1]
+            curr_range = ranges[index]
+            curr_start, curr_end = curr_range
+            prev_start, prev_end = prev_range
+            curr_ident = self.reverse_offsets[curr_start][0]
+            curr_decl = self.subregions[curr_ident]
 
-        current_offset = self.subregion_offsets[id(decl)]
+            if delta > 0 and prev_end > curr_start or shrink and delta < 0:
+                delta = prev_end - curr_start
+                new_offset = curr_decl.align(curr_start+delta, shift)
 
-        self.remove_subregion(decl)
+                if delta > 0:
+                    move_ops.append((curr_decl, new_offset))
+                else:
+                    move_ops.insert(0, (curr_decl, new_offset))
+                    
+                new_ranges[index] = (new_offset, new_offset+int(curr_decl.size()))
+            else:
+                break
 
-        old_size = decl.size()
-        decl.set_arg('size', new_size)
+            index += 1
 
-        try:
-            self.declare_subregion(decl, current_offset)
-        except Exception as e:
-            decl.set_arg('size', old_size)
-            raise e
+        while len(move_ops):
+            op = move_ops.pop()
+            decl, offset = op
+            self.move_subregion(decl, offset)
 
-        if not decl.instance is None:
-            BlockChain.set_size(decl.instance, new_size)
-        
     def bit_offset_subregions(self, bit_offset):
         current_offsets = self.subregion_offsets.items()
         current_offsets = filter(lambda x: x == bit_offset, current_offsets)
@@ -407,8 +437,19 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 class RegionError(ParanoiaError):
     pass
 
+class RegionResizeEvent(NewSizeEvent):
+    def __call__(self, decl, old_size, new_size):
+        delta = int(new_size) - int(old_size)
+
+        if delta == 0:
+            return
+        
+        parent_decl = decl.get_arg('parent_declaration')
+        parent_decl.push_subregions(decl, delta)
+
 class Region(BlockChain):
     DECLARATION_CLASS = RegionDeclaration
+    RESIZE_EVENT = RegionResizeEvent
     DECLARATION = None
     PARENT_DECLARATION = None
     ALIGNMENT = 8
@@ -442,6 +483,13 @@ class Region(BlockChain):
         self.declaration.set_instance(self)
         dict_merge(kwargs, self.declaration.args)
 
+        resize_event = kwargs.setdefault('resize_event', self.RESIZE_EVENT)
+
+        if inspect.isclass(resize_event) and issubclass(resize_event, NewSizeEvent):
+            self.resize_event = resize_event()
+        elif not isinstance(resize_event, NewSizeEvent):
+            raise RegionError('resize event must be a class or instance of NewSizeEvent')
+            
         self.alignment = kwargs.setdefault('alignment', self.ALIGNMENT)
         self.overlaps = kwargs.setdefault('overlaps', self.OVERLAPS)
         self.parent_declaration = kwargs.setdefault('parent_declaration', self.PARENT_DECLARATION)

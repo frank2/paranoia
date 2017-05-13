@@ -4,7 +4,8 @@ from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
 __all__ = ['EventError', 'Event', 'InstantiateEvent', 'SetPropertyEvent'
            ,'NewAddressEvent', 'NewShiftEvent', 'NewSizeEvent'
-           ,'SetValueEvent', 'DeclareSubregionEvent', 'RemoveSubregionEvent']
+           ,'SetValueEvent', 'DeclareSubregionEvent', 'MoveSubregionEvent'
+           ,'RemoveSubregionEvent']
 
 class EventError(ParanoiaError):
     pass
@@ -39,6 +40,10 @@ class SetValueEvent(Event):
 
 class DeclareSubregionEvent(Event):
     def __call__(self, decl, subregion):
+        raise NotImplementedError
+
+class MoveSubregionEvent(Event):
+    def __call__(self, decl, old_offset, new_offset):
         raise NotImplementedError
 
 class RemoveSubregionEvent(Event):

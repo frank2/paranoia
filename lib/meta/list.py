@@ -31,6 +31,16 @@ class ListDeclaration(RegionDeclaration):
         self.declaration_index = dict()
         self.map_declarations()
 
+    def map_declarations(self):
+        declarations = self.get_arg('declarations')
+
+        self.set_size(self.declarative_size())
+        
+        for i in xrange(len(declarations)):
+            decl = declarations[i]
+            self.declare_subregion(decl)
+            self.declaration_index[id(decl)] = i
+
     def declarative_size(self, **kwargs):
         dict_merge(kwargs, self.args)
 
@@ -51,167 +61,32 @@ class ListDeclaration(RegionDeclaration):
 
         return Size(bits=offset - shift)
 
-    def movement_deltas(self, index, init_delta):
-        overlaps = self.get_arg('overlaps')
-        declarations = self.get_arg('declarations')
-
-        if index >= len(declarations) or overlaps:
-            return None
-
-        index_decl = declarations[index]
-        index_offset = self.subregion_offsets[id(index_decl)]
-        current_offsets = filter(lambda x: x[0] >= index_offset if init_delta > 0 else x[0] > index_offset, self.subregion_ranges())
-        deltas = dict()
-        prior_delta = None
-        shift = self.get_arg('shift')
-
-        for offset in current_offsets:
-            offset, size = offset
-            ident = self.reverse_offsets[offset][0]
-                
-            if prior_delta is None:
-                deltas[offset] = index_decl.align(offset + init_delta, shift) - shift
-            else:
-                deltas[offset] = self.subregions[ident].align(offset + prior_delta, shift) - shift
-                
-            prior_delta = deltas[offset] - offset
-
-        return deltas
-
-    def accomodate_subregion(self, decl, new_size):
-        if not isinstance(decl, RegionDeclaration):
-            raise ListDeclarationError('decl must be a Declaration object')
-
-        if not self.has_subregion(decl):
-            raise ListDeclarationError('subregion not found')
-
-        current_offset = self.subregion_offsets[id(decl)]
-        current_index = self.declaration_index[id(decl)]
-        size_delta = int(new_size) - int(decl.size())
-
-        if size_delta == 0:
-            return
-
-        if size_delta > 0:
-            old_size = decl.size()
-            decl.set_arg('size', new_size)
-            new_size = self.declarative_size()
-
-            self.set_size(new_size)
-
-            # set it back to the old size and let resize_subregion do its thing
-            decl.set_arg('size', old_size)
-
-            deltas = self.movement_deltas(current_index, size_delta)
-            targets = deltas.keys()
-            targets.sort()
-            targets.reverse()
-        
-            for offset in targets:
-                ident = self.reverse_offsets[offset][0]
-                rev_decl = self.subregions[ident]
-                self.move_subregion(rev_decl, deltas[offset])
-
-        # resize_subregion will handle the other case, where the targets need to be moved *before*
-        # resize is called on the list object
-
-    def resize_subregion(self, decl, new_size):
-        if not isinstance(decl, Declaration):
-            raise ListDeclarationError('decl must be a Declaration object')
-
-        if not self.has_subregion(decl):
-            raise ListDeclarationError('subregion not found')
-
-        if not isinstance(new_size, Size):
-            raise ListDeclarationError('new_size must be a Size object')
-
-        current_offset = self.subregion_offsets[id(decl)]
-        current_index = self.declaration_index[id(decl)]
-        size_delta = int(new_size) - int(decl.size())
-
-        if size_delta == 0:
-            return
-
-        self.accomodate_subregion(decl, new_size)
-        self.remove_subregion(decl) # detaches declaration from parent
-            
-        old_size = decl.size()
-        decl.set_arg('size', new_size)
-
-        try:
-            self.declare_subregion(decl, current_offset)
-        except Exception as e:
-            decl.set_size(old_size)
-            raise e
-
-        if size_delta < 0:
-            # subregion shrank, move all subregions
-            deltas = self.movement_deltas(current_index, size_delta)
-            targets = deltas.keys()
-            targets.sort()
-        
-            for offset in targets:
-                ident = self.reverse_offsets[offset][0]
-                rev_decl = self.subregions[ident]
-                self.move_subregion(rev_decl, deltas[offset])
-
-        # region can now be resized
-        self.set_size(self.declarative_size())
-
-        if not decl.instance is None:
-            decl.instance.size = new_size
-
     def insert_declaration(self, index, decl):
         if self.is_bound():
             raise ListDeclarationError('cannot alter declarations of bound list after instantiation')
 
         declarations = self.get_arg('declarations')
         decl = ensure_declaration(decl)
-        deltas = self.movement_deltas(index, int(decl.size()))
         declarations.insert(index, decl)
-        overlaps = self.get_arg('overlaps')
 
-        try:
-            self.set_size(self.declarative_size())
-        except Exception,e:
-            declarations.pop(index)
-            raise e
-
-        if not deltas is None:
-            targets = deltas.keys()
-            targets.sort()
-            targets.reverse()
-
-            for offset in targets:
-                ident = self.reverse_offsets[offset][0]
-                rev_decl = self.subregions[ident]
-                self.move_subregion(rev_decl, deltas[offset])
-
-        self.declaration_index[id(decl)] = index
-
-        if overlaps:
-            index = 0
-
-        shift = self.get_arg('shift')
-
-        if not index == 0:
-            prev_decl = declarations[index-1]
-            prev_offset = self.subregion_offsets[id(prev_decl)]
-            prev_size = prev_decl.size()
-            index = decl.align(prev_offset + int(prev_size), shift) - shift
-
-        class ListMemberResizeEvent(NewSizeEvent):
-            list_object = self
-            
-            def __call__(self, decl, old_size, new_size):
-                if not self.list_object.declarative_size() == self.list_object.size:
-                    self.list_object.set_size(self.list_object.declarative_size())
-
-        decl.add_event(ListMemberResizeEvent())
-            
-        self.declare_subregion(decl, index)
+        for decl_index in range(index, len(declarations)):
+            target_decl = declarations[decl_index]
+            self.declaration_index[id(target_decl)] = decl_index
 
         self.set_size(self.declarative_size())
+        shift = self.get_arg('shift')
+
+        if index+1 < len(declarations):
+            self.push_subregions(declarations[index+1], decl.size(), True)
+
+        if index == 0:
+            offset = 0
+        else:
+            prev_decl = declarations[index-1]
+            prev_offset = self.subregion_offsets[id(prev_decl)]
+            offset = decl.align(prev_offset+int(prev_decl.size()), shift) - shift
+            
+        self.declare_subregion(decl, offset)
 
         return decl
 
@@ -220,8 +95,6 @@ class ListDeclaration(RegionDeclaration):
             raise ListDeclarationError('cannot alter declarations of bound list after instantiation')
 
         declarations = self.get_arg('declarations')
-        decl = declarations[index]
-        deltas = self.movement_deltas(index, -int(decl.size()))
         removed_decl = declarations.pop(index)
 
         try:
@@ -230,16 +103,14 @@ class ListDeclaration(RegionDeclaration):
             declarations.insert(index, removed_decl)
             raise e
 
+        for decl_index in range(index, len(declarations)):
+            target_decl = declarations[decl_index]
+            self.declaration_index[id(target_decl)] = decl_index
+
         del self.declaration_index[id(removed_decl)]
 
-        if not deltas is None:
-            targets = deltas.keys()
-            targets.sort()
-            
-            for offset in targets:
-                ident = self.reverse_offsets[offset][0]
-                rev_decl = self.subregions[ident]
-                self.move_subregion(rev_decl, deltas[offset])
+        if not index >= len(declarations):
+            self.push_subregions(declarations[index], -int(removed_decl.size()), True)
 
         self.set_size(self.declarative_size())
 
@@ -254,8 +125,25 @@ class ListDeclaration(RegionDeclaration):
 class ListError(ParanoiaError):
     pass
 
+class ListResizeEvent(NewSizeEvent):
+    def __call__(self, decl, old_size, new_size):
+        delta = int(new_size) - int(old_size)
+
+        if delta == 0:
+            return
+
+        parent_decl = decl.get_arg('parent_declaration')
+
+        if delta > 0:
+            parent_decl.set_size(parent_decl.declarative_size())
+            parent_decl.push_subregions(decl, delta)
+        else:
+            parent_decl.push_subregions(decl, delta)
+            parent_decl.set_size(parent_decl.declarative_size())
+            
 class List(Region):
     SHRINK = True
+    RESIZE_EVENT = ListResizeEvent
     DECLARATIONS = None
     DECLARATION_CLASS = ListDeclaration
 

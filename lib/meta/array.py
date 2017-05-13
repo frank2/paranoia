@@ -47,7 +47,7 @@ class ArrayDeclaration(ListDeclaration):
 
         if base_decl is None:
             raise ArrayDeclarationError('base_declaration cannot be None')
-
+        
         if elements < elem_arg:
             for i in range(elements, elem_arg):
                 self.remove_declaration(elements)
