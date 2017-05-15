@@ -47,7 +47,14 @@ class Declaration(ParanoiaAgent):
         self.events = kwargs.setdefault('events', self.EVENTS)
 
         if self.events is None:
-            self.events = list()
+            self.events = dict()
+        elif isinstance(self.events, (list, tuple)):
+            new_events = self.events
+            
+            self.events = dict()
+            
+            for event in self.events:
+                self.add_event(event)
 
         instance = kwargs.setdefault('instance', None)
         self.set_instance(instance)
@@ -56,7 +63,12 @@ class Declaration(ParanoiaAgent):
         if not isinstance(event, Event):
             raise DeclarationError('event must be an Event')
 
-        return event in self.events
+        base_event = get_event_base(event)
+
+        if not base_event in self.events:
+            return False
+
+        return event in self.events[base_event]
 
     def add_event(self, event):
         if not isinstance(event, Event):
@@ -64,17 +76,9 @@ class Declaration(ParanoiaAgent):
 
         if self.has_event(event):
             return
-        
-        self.events.append(event)
 
-    def insert_event(self, index, event):
-        if not isinstance(event, Event):
-            raise DeclarationError('event must be an Event')
-
-        if self.has_event(event):
-            return
-        
-        self.events.insert(index, event)
+        base_event = get_event_base(event)
+        self.events.setdefault(base_event, list()).append(event)
         
     def remove_event(self, event):
         if not isinstance(event, Event):
@@ -82,14 +86,21 @@ class Declaration(ParanoiaAgent):
 
         if not self.has_event(event):
             raise DeclarationError('no such event')
-        
-        self.events.remove(event)
+
+        base_event = get_event_base(event)
+        self.events[base_event].remove(event)
+
+        if len(self.events[base_event]) == 0:
+            del self.events[base_event]
 
     def trigger_event(self, event_class, *args):
         if not issubclass(event_class, Event):
             raise DeclarationError('event class must be an Event class')
 
-        events_available = filter(lambda x: isinstance(x, event_class), self.events)
+        events_available = self.events.get(event_class)
+
+        if events_available is None:
+            return
         
         for event in events_available:
             event(self, *args)

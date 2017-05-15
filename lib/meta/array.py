@@ -47,16 +47,43 @@ class ArrayDeclaration(ListDeclaration):
 
         if base_decl is None:
             raise ArrayDeclarationError('base_declaration cannot be None')
+
+        shift = self.get_arg('shift')
         
         if elements < elem_arg:
-            for i in range(elements, elem_arg):
-                self.remove_declaration(elements)
+            decls = self.get_arg('declarations')
+            truncated = decls[:elements]
+            erased = decls[elements:]
+            self.set_arg('declarations', truncated)
+            
+            for dead_decl in reversed(erased):
+                del self.declaration_index[id(dead_decl)]
+                self.remove_subregion(dead_decl)
+
+            self.set_size(self.declarative_size())
         elif elements > elem_arg:
             old_length = elem_arg
             element_delta = elements - old_length
+            new_decls = [base_decl.copy() for i in xrange(element_delta)]
+            decls = self.get_arg('declarations')
+            new_index = len(decls)
+            decls += new_decls
 
-            for i in range(element_delta):
-                self.append_declaration(base_decl.copy())
+            self.set_arg('declarations', decls)
+            self.set_size(self.declarative_size())
+
+            for decl_index in range(new_index, len(decls)):
+                new_decl = decls[decl_index]
+                
+                if decl_index == 0:
+                    offset = 0
+                else:
+                    prev_decl = decls[decl_index-1]
+                    prev_offset = self.subregion_offsets[id(prev_decl)]
+                    offset = new_decl.align(prev_offset+int(prev_decl.size()), shift) - shift
+                    
+                self.declaration_index[id(new_decl)] = decl_index
+                self.declare_subregion(new_decl, offset)
 
     def get_elements(self):
         return self.get_arg('elements')

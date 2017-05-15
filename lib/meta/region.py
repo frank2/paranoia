@@ -42,6 +42,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.subregions = dict()
         self.subregion_offsets = dict()
         self.reverse_offsets = dict()
+        self.current_offsets = set()
 
     def set_address(self, address, shift=None):
         if self.instance is None:
@@ -96,8 +97,6 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             return shift + align(offset, alignment)
 
     def size(self, **kwargs):
-        dict_merge(kwargs, self.args)
-        
         size = self.get_arg('size')
 
         if size is None or int(size) == 0:
@@ -151,13 +150,14 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             decl.rebase(base, shift)
 
     def subregion_ranges(self):
-        regions = self.subregion_offsets.items()
-        regions.sort(lambda x,y: cmp(x[1], y[1]))
         result = list()
 
-        for region in regions:
-            ident, offset = region
-            result.append((offset, offset + int(self.subregions[ident].size())))
+        for offset in self.current_offsets:
+            reverse_offset = self.reverse_offsets[offset]
+
+            for ident in reverse_offset:
+                region = self.subregions[ident]
+                result.append((offset, offset + int(region.size())))
 
         return result
 
@@ -169,22 +169,24 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if bitspan == 0:
             return False
-        
-        offsets = self.subregion_ranges()
 
-        for pairing in offsets:
-            start, end = pairing
+        if bit_offset in self.reverse_offsets and not skip_same:
+            return True
 
+        for start in self.current_offsets:
             if skip_same and bit_offset == start:
                 continue
+            
+            for offset_ident in self.reverse_offsets[start]:
+                end = start + int(self.subregions[offset_ident].size())
 
-            if bit_offset >= start and bit_offset < end:
-                return True
+                if bit_offset >= start and bit_offset < end:
+                    return True
 
-            end_region = bit_offset + bitspan
+                end_region = bit_offset + bitspan
 
-            if end_region > start and end_region <= end:
-                return True
+                if end_region > start and end_region <= end:
+                    return True
 
         return False
 
@@ -193,13 +195,12 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         
         if overlaps:
             return 0
-        
-        offsets = self.subregion_ranges()
 
-        if len(offsets) == 0:
+        if len(self.current_offsets) == 0:
             return 0
 
-        start, end = offsets[-1]
+        start = max(self.current_offsets)
+        end = start + max(map(lambda x: int(x.size()), self.reverse_offsets[start]))
         return end
 
     def has_subregion(self, decl):
@@ -228,6 +229,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
         self.reverse_offsets.setdefault(bit_offset, list()).append(id(decl))
+        self.current_offsets.add(bit_offset)
 
         if bit_offset+int(decl.size()) > int(self.size()):
             raise RegionDeclarationError('declaration exceeds region size')
@@ -279,7 +281,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         if len(self.reverse_offsets[offset]) == 0:
             del self.reverse_offsets[offset]
-            
+
+        self.current_offsets.remove(offset)
         del self.subregion_offsets[id(decl)]
         del self.subregions[id(decl)]
         
@@ -317,6 +320,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if len(self.reverse_offsets[current_offset]) == 0:
             del self.reverse_offsets[current_offset]
 
+        self.current_offsets.remove(current_offset)
+
         if not self.get_arg('address') is None:
             new_base = self.bit_offset_to_base(new_offset, decl.get_arg('alignment'))
             new_shift = self.bit_offset_to_shift(new_offset, decl.get_arg('alignment'))
@@ -326,6 +331,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         self.subregion_offsets[id(decl)] = new_offset
         self.reverse_offsets.setdefault(new_offset, list()).append(id(decl))
+        self.current_offsets.add(new_offset)
 
         if not new_base is None:
             decl.rebase(new_base, new_shift)
@@ -353,16 +359,28 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         index = 0
 
         for index in xrange(len(ranges)):
-            if index > 0 and ranges[index-1][0] == decl_offset:
+            if not include and index > 0 and ranges[index-1][0] == decl_offset:
+                break
+            elif include and ranges[index][0] == decl_offset:
                 break
 
-        new_ranges = {index-1: (decl_offset, ranges[index-1][1] + delta)}
+        if not include and index == len(ranges)-1:
+            return
 
         if include:
-            move_ops.append((decl, decl_offset+delta))
-
+            offset = decl.align(decl_offset+delta, shift)
+            new_ranges = {index: (offset, int(decl.size()+offset))}
+            move_ops.append((decl, offset))
+            index += 1
+        else:
+            new_ranges = {index-1: (ranges[index-1][0], ranges[index-1][1]+delta)}
+            
         while index < len(ranges):
-            prev_range = new_ranges[index-1]
+            if index == 0:
+                prev_range = (0, 0)
+            else:
+                prev_range = new_ranges[index-1]
+                
             curr_range = ranges[index]
             curr_start, curr_end = curr_range
             prev_start, prev_end = prev_range
