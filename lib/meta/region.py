@@ -38,7 +38,15 @@ class OffsetNode(AVLNode):
     VALUE_CLASS = dict
 
     def size(self, declaration_map):
-        return max(map(lambda x: int(declaration_map[x].size()), self))
+        max_size = 0
+
+        for k in self.value:
+            new_size = declaration_map[k].size()
+
+            if new_size > max_size:
+                max_size = new_size
+                
+        return max_size
 
     def __iter__(self):
         return iter(self.value.keys())
@@ -170,6 +178,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if size is None or int(size) == 0:
             dict_merge(kwargs, self.args)
             size = self.base_class.static_size(**kwargs)
+            self.set_arg('size', size)
 
         return size
 
@@ -231,6 +240,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         bit_range = bit_offset + bitspan
         bit_target = bit_offset
+        traversals = 0
 
         while not node is None:
             if node.label == bit_target:
@@ -239,10 +249,10 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
                 bit_target = bit_range
 
-            size = node.size()
+            size = node.size(self.subregions)
             range_value = node.label + size
 
-            if bit_target > node.label and bit_target <= range_value:
+            if bit_target > node.label and bit_target < range_value:
                 return True
 
             if not bit_target == bit_range and bit_range > node.label and bit_range <= range_value:
@@ -254,6 +264,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 node = node.left
             else:
                 node = node.right
+
+            traversals += 1
 
     def next_subregion_offset(self):
         overlaps = self.get_arg('overlaps')
@@ -270,7 +282,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             root = root.right
 
         start = root.label
-        return start + root.size()
+        offset = start + root.size(self.subregions)
+        
+        return start + root.size(self.subregions)
 
     def has_subregion(self, decl):
         if not isinstance(decl, RegionDeclaration):
@@ -292,16 +306,19 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         else:
             bit_offset = decl.align(bit_offset, shift)
 
-        if self.in_subregion(bit_offset, int(decl.size())):
-             raise RegionDeclarationError('subregion declaration overwrites another subregion')
+            if self.in_subregion(bit_offset, int(decl.size())):
+                raise RegionDeclarationError('subregion declaration overwrites another subregion')
 
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
-        
-        current_node = self.current_offsets.find_node(bit_offset)
+
+        if self.current_offsets.is_empty():
+            current_node = None
+        else:
+            current_node = self.current_offsets.find_node(bit_offset)
 
         if current_node is None:
-            current_node = self.current_offsets.add_offset(bit_offset, decl)
+            current_node = self.current_offsets.add_offset(int(bit_offset), decl)
             self.reverse_offsets[bit_offset] = current_node.value
         else:
             current_node.value[id(decl)] = None
@@ -440,7 +457,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         for i in xrange(len(self.current_offsets)):
             index = i
             node = nodes.next()
-            ranges[i] = (node.label, node.label+int(node.size()))
+            ranges[i] = (node.label, node.label+int(node.size(self.subregions)))
             
             if not include and index > 0 and ranges[index-1][0] == decl_offset:
                 break
@@ -465,7 +482,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 prev_range = new_ranges[index-1]
 
             curr_node = nodes.next()
-            curr_range = curr_node.label + curr_node.size()
+            curr_range = curr_node.label + curr_node.size(self.declarations)
             curr_start, curr_end = curr_range
             prev_start, prev_end = prev_range
             curr_ident = curr_node.value.keys()[0]

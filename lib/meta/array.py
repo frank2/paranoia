@@ -83,7 +83,7 @@ class ArrayDeclaration(ListDeclaration):
                     offset = new_decl.align(prev_offset+int(prev_decl.size()), shift) - shift
                     
                 self.declaration_index[id(new_decl)] = decl_index
-                self.declare_subregion(new_decl, offset)
+                self.declare_subregion(new_decl)
 
     def get_elements(self):
         return self.get_arg('elements')
