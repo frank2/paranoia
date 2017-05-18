@@ -54,50 +54,73 @@ class OffsetNode(AVLNode):
 class OffsetTree(AVLTree):
     NODE_CLASS = OffsetNode
 
+    def __init__(self, **kwargs):
+        super(OffsetTree, self).__init__(**kwargs)
+
+        self.tail = None
+
     def add_offset(self, offset, decl):
         if self.root is None:
-            return self.add_node(offset, {id(decl): None})
+            self.root = self.add_node(offset, {id(decl): None})
+            self.tail = self.root
+            return self.root
+
+        if offset in self.labels:
+            node = self.labels[offset]
+
+            if not id(decl) in node.value:
+                node.value[id(decl)] = None
+
+            return node
             
-        node_path = self.root.search_path(offset)
-        parent = node_path[-1]
+        parent = self.root.search_path(offset)
         branch = parent.branch_function(offset, parent.label)
-
-        if not isinstance(branch, int):
-            raise ValueError('branch function returned invalid value')
-
-        if branch == 0:
-            if not id(decl) in parent.value:
-                parent.value[id(decl)] = None
-                
-            return parent
-
         new_node = self.new_node(offset, {id(decl): None})
 
         if branch < 0:
-            parent.set_left_child(new_node)
+            parent.left = new_node
         elif branch > 0:
-            parent.set_right_child(new_node)
+            parent.right = new_node
 
+        new_node.parent = parent
+        
         self.update_height(new_node)
+
+        if self.tail is None:
+            self.tail = new_node
+        elif self.tail.branch_function(offset, self.tail.label) > 0:
+            self.tail = new_node
 
         return new_node
 
     def remove_offset(self, offset):
+        if not self.tail is None and self.tail.label == offset:
+            tail_parent = self.tail.parent
+
+            if not tail_parent is None:
+                self.tail = self.tail.parent
+            else:
+                left_child = self.tail.left
+
+                if left_child is None:
+                    self.tail = left_child
+                else:
+                    self.tail = left_child
+
+                    while not self.tail.right is None:
+                        self.tail = self.tail.right
+
         self.remove_node(offset)
 
     def remove_declaration(self, offset, decl):
         if self.is_empty():
             raise RuntimeError('offset tree is empty')
+
+        if not self.has_label(offset):
+            raise RuntimeError('offset not found in tree')
         
         decl_id = id(decl)
-        node_path = self.root.search_path(offset)
-        parent = node_path[-1]
-        branch = parent.branch_function(offset, parent.label)
-
-        if not branch == 0:
-            raise RuntimeError('offset not found in tree')
-
-        node = parent
+        node = self.labels[offset]
 
         if not decl_id in node.value:
             raise RuntimeError('declaration not in tree node')
@@ -240,7 +263,6 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         bit_range = bit_offset + bitspan
         bit_target = bit_offset
-        traversals = 0
 
         while not node is None:
             if node.label == bit_target:
@@ -265,8 +287,6 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             else:
                 node = node.right
 
-            traversals += 1
-
     def next_subregion_offset(self):
         overlaps = self.get_arg('overlaps')
         
@@ -276,16 +296,17 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if self.current_offsets.is_empty():
             return 0
 
-        root = self.current_offsets.root
+        root = self.current_offsets.tail
 
-        while not root.right is None:
-            root = root.right
-
-        start = root.label
-        offset = start + root.size(self.subregions)
+        if root is None:
+            print self.current_offsets.root
+            raise RuntimeError('FUCK')
+            return 0
         
-        return start + root.size(self.subregions)
-
+        start = root.label
+        offset = start + root.size(self.subregions).bits
+        return offset
+    
     def has_subregion(self, decl):
         if not isinstance(decl, RegionDeclaration):
             raise RegionDeclarationError('decl must be a RegionDeclaration object')

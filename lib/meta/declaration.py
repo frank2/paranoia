@@ -128,7 +128,7 @@ class Declaration(ParanoiaAgent):
     def get_arg(self, arg):
         if not arg in self.args:
             return getattr(self.base_class, arg.upper(), None)
-
+        
         return self.args[arg]
 
     def set_arg(self, arg, value, from_instance=False):

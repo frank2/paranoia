@@ -149,7 +149,8 @@ def aligned(base, alignment):
     return base % alignment == 0
 
 def alignment_delta(base, alignment):
-    return (alignment - (base % alignment)) * int(not aligned(base, alignment))
+    modulus = base % alignment
+    return (alignment - modulus) * int(not modulus == 0)
 
 def align(base, alignment):
     return base + alignment_delta(base, alignment)
