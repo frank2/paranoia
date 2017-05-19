@@ -241,4 +241,13 @@ class Mapping(List):
 
         return SubclassedMapping
 
+    @classmethod
+    def declare(cls, **kwargs):
+        kwargs.setdefault('fields', cls.FIELDS)
+
+        super_decl = super(Mapping, cls).declare(**kwargs)
+        super_decl.base_class = cls
+ 
+        return super_decl
+
 MappingDeclaration.BASE_CLASS = Mapping

@@ -214,8 +214,6 @@ class Array(Region):
         
     @classmethod
     def subclass(cls, **kwargs):
-        kwargs.setdefault('declaration_class', cls.DECLARATION_CLASS)
-        kwargs.setdefault('resize_event', cls.RESIZE_EVENT)
         kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
         kwargs.setdefault('elements', cls.ELEMENTS)
 
@@ -228,5 +226,15 @@ class Array(Region):
             ELEMENTS = kwargs['elements']
 
         return SubclassedArray
+
+    @classmethod
+    def declare(cls, **kwargs):
+        kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
+        kwargs.setdefault('elements', cls.ELEMENTS)
+
+        super_decl = super(Array, cls).declare(**kwargs)
+        super_decl.base_class = cls
+
+        return super_decl
 
 ArrayDeclaration.BASE_CLASS = Array

@@ -57,7 +57,12 @@ class ListDeclaration(RegionDeclaration):
 
         for decl in declarations:
             offset = decl.align(offset, shift) - shift
-            offset += int(decl.size())
+            decl_size = decl.size()
+
+            if decl_size is None:
+                decl_size = decl.declarative_size()
+                
+            offset += int(decl_size)
 
         return Size(bits=offset - shift)
 
@@ -297,5 +302,14 @@ class List(Region):
             DECLARATIONS = kwargs['declarations']
 
         return SubclassedList
+
+    @classmethod
+    def declare(cls, **kwargs):
+        declarations = kwargs.setdefault('declarations', cls.DECLARATIONS)
+
+        super_decl = super(List, cls).declare(**kwargs)
+        super_decl.base_class = cls
+
+        return super_decl
 
 ListDeclaration.BASE_CLASS = List

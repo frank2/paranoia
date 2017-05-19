@@ -201,6 +201,13 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         if size is None or int(size) == 0:
             dict_merge(kwargs, self.args)
             size = self.base_class.static_size(**kwargs)
+
+            self.set_arg('size', size)
+
+        if size is None:
+            # size is still None, try the declarative size
+            dict_merge(kwargs, self.args)
+            size = self.declarative_size(**kwargs)
             self.set_arg('size', size)
 
         return size
@@ -728,6 +735,27 @@ class Region(BlockChain):
 
         if declaration_class is None:
             raise RegionError('declaration class cannot be None')
+        
+        kwargs.setdefault('resize_event', cls.RESIZE_EVENT)
+        kwargs.setdefault('declaration', cls.DECLARATION)
+        kwargs.setdefault('parent_declaration', cls.PARENT_DECLARATION)
+        kwargs.setdefault('alignment', cls.ALIGNMENT)
+        kwargs.setdefault('value', cls.VALUE)
+        kwargs.setdefault('overlaps', cls.OVERLAPS)
+        kwargs.setdefault('shrink', cls.SHRINK)
+
+        # since BlockChain doesn't support this function, include
+        # the arguments it would have
+        kwargs.setdefault('address', cls.ADDRESS)
+        kwargs.setdefault('allocator', cls.ALLOCATOR)
+        kwargs.setdefault('auto_allocate', cls.AUTO_ALLOCATE)
+        kwargs.setdefault('size', cls.SIZE)
+        kwargs.setdefault('shift', cls.SHIFT)
+        kwargs.setdefault('buffer', cls.BUFFER)
+        kwargs.setdefault('bind', cls.BIND)
+        kwargs.setdefault('static', cls.STATIC)
+        kwargs.setdefault('maximum_size', cls.MAXIMUM_SIZE)
+        kwargs.setdefault('parse_memory', cls.PARSE_MEMORY)
         
         return declaration_class(base_class=cls, args=kwargs)
 

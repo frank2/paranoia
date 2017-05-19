@@ -19,7 +19,7 @@ setup(
     ,url = 'https://github.com/frank2/paranoia'
     ,package_dir = {'paranoia': 'lib'}
     ,packages = ['paranoia', 'paranoia.base', 'paranoia.meta', 'paranoia.types']
-    ,install_requires = ['yggdrasil>=0.7.1']
+    ,install_requires = ['yggdrasil>=0.7.2']
     ,test_suite = 'setup.unit_tests'
     ,long_description = '''PARANOiA, named after the series of DDR songs, is a library for data structures
 and general manipulation of binary and executable data. It is capable of creating dynamic structures

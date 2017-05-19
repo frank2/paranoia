@@ -2,6 +2,7 @@
 
 import platform
 import ctypes
+import random
 import sys
 import traceback
 
@@ -10,7 +11,9 @@ try:
 except ImportError: # python3
     import builtins as __builtin__
 
-from paranoia.fundamentals import align, string_address, malloc, realloc, free
+from yggdrasil import AVLTree
+
+from paranoia.fundamentals import align, string_address, malloc, realloc, free, hexdump
 from paranoia.fundamentals import memset, memmove
 from paranoia.base.address import Address
 from paranoia.base.block import Block, BlockChain
@@ -21,8 +24,9 @@ memory = None
 heap = None
 
 __all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation'
-           ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'heap'
-           ,'memory', 'allocators']
+           ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'VirtualAllocation',
+           'VirtualAllocator', 'DiskAllocator', 'DiskAllocation', 'heap', 'memory'
+           ,'disk', 'allocators']
 
 class AllocatorError(ParanoiaError):
     pass
@@ -63,6 +67,11 @@ class Allocation(ParanoiaAgent):
 
         self.addresses = dict()
         self.blocks = dict()
+
+    def hexdump(self, label=None):
+        self.check_id()
+        
+        hexdump(self.id, self.size, label)
 
     def set_buffering(self, buffering):
         if not isinstance(buffering, bool):
@@ -348,6 +357,9 @@ class Allocation(ParanoiaAgent):
         for address_index in self.addresses:
             self.addresses[address_index].allocation = None
 
+    def __len__(self):
+        return self.size
+
     def __getitem__(self, index):
         if index < 0:
             index += self.size
@@ -406,6 +418,77 @@ class MemoryAllocation(Allocation):
             self.rellocate(new_size)
 
         return super(MemoryAllocation, self).write_bytestring(id_val, string, force, direct)
+
+class VirtualAllocation(Allocation):
+    def hexdump(self, label=None):
+        self.check_id()
+        
+        backing_alloc = self.allocator.backing_allocations[self.id]
+
+        if not label:
+            label = '<Virtual:%X>' % self.id
+
+        backing_alloc.hexdump(label)
+
+    def get_block(self, id_val, force=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.get_block(mem_addr)
+
+    def get_block(self, id_val, block, force=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.set_block(mem_addr, block, force)
+        
+    def read_byte(self, id_val):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.read_byte(mem_addr)
+    
+    def write_byte(self, id_val, byte_val):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.write_byte(mem_addr, byte_val)
+
+    def read_bytestring(self, id_val, size=None, force=False, direct=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.read_bytestring(mem_addr, size=size, force=force, direct=direct)
+
+    def write_bytestring(self, id_val, string, force=False, direct=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.write_bytestring(mem_addr, string, force=force, direct=direct)
+
+    def flush(self, id_val=None, size=None):
+        if not id_val is None:
+            self.check_id()
+            self.check_id_range(id_val)
+
+            mem_addr = self.allocation.memory_address(id_val)
+        else:
+            mem_addr = id_val
+
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.flush(mem_addr, size)
     
 class Allocator(ParanoiaAgent):
     BUFFER = True
@@ -414,7 +497,7 @@ class Allocator(ParanoiaAgent):
         global allocators
 
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
-        self.allocations = dict()
+        self.allocations = AVLTree()
 
         allocators.add(self)
 
@@ -425,7 +508,7 @@ class Allocator(ParanoiaAgent):
         self.buffer = buffering
 
         for allocation_id in self.allocations:
-            self.allocations[allocation_id].set_buffering(self.buffer)
+            self.allocations[allocation_id].value.set_buffering(self.buffer)
 
     def allocate(self, length):
         raise AllocatorError('allocate not implemented')
@@ -437,17 +520,28 @@ class Allocator(ParanoiaAgent):
         if not address in self.allocations:
             raise AllocatorError('no such address %x' % address)
 
-        self.allocations[address].invalidate()
+        self.allocations[address].value.invalidate()
         del self.allocations[address]
 
     def find(self, address):
-        keys = filter(lambda x: x <= address < x+self.allocations[x].size
-                      ,self.allocations.keys())
+        if address in self.allocations:
+            return self.allocations[address].value
 
-        if not len(keys):
-            return None
+        # root address not found, see if it's in a range
+        node = self.allocations.root
 
-        return self.allocations[keys[0]]
+        while not node is None:
+            allocation = node.value
+
+            if address >= allocation.id and address < allocation.id+allocation.size:
+                return allocation
+
+            branch = node.branch_function(address, node.label)
+
+            if branch < 0:
+                node = node.left
+            elif branch > 0:
+                node = node.right
 
     def __del__(self):
         global allocators
@@ -474,68 +568,77 @@ class MemoryAllocator(Allocator):
 
         self.allocations[address] = MemoryAllocation(id=address, size=1, allocator=self, buffer=self.buffer)
 
-        return self.allocations[address]
+        return self.allocations[address].value
 
     def reallocate(self, address, size):
         if not address in self.allocations:
             raise AllocatorError('address was not allocated by allocator')
 
         end_address = address+size
-        allocation = self.allocations[address]
+        allocation = self.allocations[address].value
         allocation.size = size
 
-        consumed_allocations = filter(lambda x: not x == address and address <= x < end_address, self.allocations.keys())
+        consumed_allocations = filter(lambda x: not x == start_address and start_address <= x < end_address, self.allocations.keys())
         consumed_allocations.sort()
 
         for consumed_addr in consumed_allocations:
-            consumed_offset = consumed_addr - address
-            consumed_alloc = self.allocations[consumed_addr]
-            consumed_size = consumed_alloc.size
-            consumed_end = consumed_addr + consumed_size
-            consumed_offset_end = consumed_offset + consumed_size
-            consumed_addresses = filter(lambda x: x+consumed_offset < size, consumed_alloc.addresses.keys())
-            
-            # shift and save the overlapped address objects
-            for address_offset in consumed_addresses:
-                address_obj = consumed_alloc.addresses[address_offset]
-                address_obj.allocation = allocation
-                address_obj.offset += consumed_offset
-                allocation.addresses[consumed_offset+address_offset] = address_obj
-                del consumed_alloc.addresses[address_offset]
-                
-            consumed_blocks = filter(lambda x: x+consumed_offset < size, consumed_alloc.blocks.keys())
-            
-            # save the overlapped blocks into our allocation
-            for block_offset in consumed_blocks:
-                block = consumed_alloc.blocks[block_offset]
-                allocation.set_block(int(block.address), block, True)
-                del consumed_alloc.blocks[block_offset]
+            self.consume_address(consumed_addr, start_address, end_address)
 
-            if consumed_end <= end_address:
-                del self.allocations[consumed_addr]
-                continue
-            
-            # this region only overlaps partially, move the beginning of the consumed region
-            # to the end of the new allocation
-            unconsumed_addresses = filter(lambda x: x+consumed_offset >= size, consumed_alloc.addresses.keys())
-            unconsumed_blocks = filter(lambda x: x+consumed_offset >= size, consumed_alloc.blocks.keys())
-            unconsumed_delta = size - consumed_offset
-
-            for unconsumed_offset in unconsumed_blocks:
-                new_offset = unconsumed_offset - unconsumed_delta
-                unconsumed_block = consumed_alloc.blocks[unconsumed_offset]
-                consumed_alloc.blocks[new_offset] = unconsumed_block
-                del consumed_alloc.blocks[unconsumed_offset]
-                    
-                unconsumed_block.address.allocation = consumed_alloc
-                unconsumed_block.address.offset -= unconsumed_delta
-
-            consumed_alloc.id = end_address
-
-            del self.allocations[consumed_addr]
-            self.allocations[end_address] = consumed_alloc
-        
         return allocation
+    
+    def consume_address(self, consumed_address, start_address, end_address):
+        if not consumed_address in self.allocations:
+            raise AllocationError('consumed address not in allocations')
+
+        if not consumed_address >= start_address or not consumed_address < end_address:
+            raise AllocationError('consumed address not in the range of start and end')
+        
+        consumed_offset = consumed_address - start_address
+        consumed_alloc = self.allocations[consumed_address].value
+        consumed_size = consumed_alloc.size
+        consumed_end = consumed_address + consumed_size
+        consumed_offset_end = consumed_offset + consumed_size
+        consumed_addresses = filter(lambda x: x+consumed_offset < size, consumed_alloc.addresses.keys())
+            
+        # shift and save the overlapped address objects
+        for address_offset in consumed_addresses:
+            address_obj = consumed_alloc.addresses[address_offset]
+            address_obj.allocation = allocation
+            address_obj.offset += consumed_offset
+            allocation.addresses[consumed_offset+address_offset] = address_obj
+            del consumed_alloc.addresses[address_offset]
+                
+        consumed_blocks = filter(lambda x: x+consumed_offset < size, consumed_alloc.blocks.keys())
+            
+        # save the overlapped blocks into our allocation
+        for block_offset in consumed_blocks:
+            block = consumed_alloc.blocks[block_offset]
+            allocation.set_block(int(block.address), block, True)
+            del consumed_alloc.blocks[block_offset]
+
+        if consumed_end <= end_address:
+            del self.allocations[consumed_addr]
+            return
+            
+        # this region only overlaps partially, move the beginning of the consumed region
+        # to the end of the new allocation
+        unconsumed_addresses = filter(lambda x: x+consumed_offset >= size, consumed_alloc.addresses.keys())
+        unconsumed_blocks = filter(lambda x: x+consumed_offset >= size, consumed_alloc.blocks.keys())
+        unconsumed_delta = size - consumed_offset
+
+        for unconsumed_offset in unconsumed_blocks:
+            new_offset = unconsumed_offset - unconsumed_delta
+            unconsumed_block = consumed_alloc.blocks[unconsumed_offset]
+            consumed_alloc.blocks[new_offset] = unconsumed_block
+            del consumed_alloc.blocks[unconsumed_offset]
+                    
+            unconsumed_block.address.allocation = consumed_alloc
+            unconsumed_block.address.offset -= unconsumed_delta
+
+        consumed_alloc.id = end_address
+
+        del self.allocations[consumed_address]
+        self.allocations[end_address] = consumed_alloc
 
 memory = MemoryAllocator()
 
@@ -605,7 +708,7 @@ class HeapAllocator(Allocator):
         if not address in self.allocations:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
-        allocation = self.allocations[address]
+        allocation = self.allocations[address].value
         new_address = realloc(address, size)
 
         allocation.id = new_address
@@ -625,7 +728,7 @@ class HeapAllocator(Allocator):
         if address not in self.allocations:
             raise AllocatorError('no such address allocated: 0x%x' % address)
 
-        allocation = self.allocations[address]
+        allocation = self.allocations[address].value
 
         memset(address, 0, allocation.size)
         free(address)
@@ -640,3 +743,190 @@ class HeapAllocator(Allocator):
 
 heap = HeapAllocator()
 BlockChain.ALLOCATOR = heap
+
+class VirtualAllocator(Allocator):
+    ZERO_MEMORY = True
+    BASE_ADDRESS = 0x4444520000000000
+                                       
+    def __init__(self, **kwargs):
+        super(VirtualAllocator, self).__init__(**kwargs)
+        
+        self.zero_memory = kwargs.setdefault('zero_memory', self.ZERO_MEMORY)
+        self.base_address = kwargs.setdefault('base_address', self.BASE_ADDRESS)
+
+        if self.base_address is None:
+            self.base_address = random.randrange(0x1000, 0x7FFF)
+            self.base_address <<= 48
+
+        self.backing_allocations = dict()
+
+    def offset_address(self, offset):
+        return self.base_address + offset
+
+    def memory_address(self, virtual_address):
+        allocation = self.find(virtual_address)
+
+        if allocation is None:
+            return None
+
+        backing_alloc = self.backing_allocations[allocation.id]
+        delta = virtual_address - allocation.id
+
+        return backing_alloc.id+delta
+
+    def allocate(self, offset, size):
+        global heap
+        
+        long = getattr(__builtin__, 'long', None)
+
+        if long is None: # python3
+            long = int
+
+        if not isinstance(offset, (int, long)):
+            raise AllocationError('offset must be an int or a long')
+
+        offset = long(offset)
+
+        if not isinstance(size, (int, long)):
+            raise AllocationError('size must be an int or a long')
+
+        size = long(size)
+
+        backing_allocation = heap.allocate(size)
+        base_address = self.offset_address(offset)
+        self.backing_allocations[base_address] = backing_allocation
+
+        allocation = VirtualAllocation(id=base_address
+                                       ,size=size
+                                       ,allocator=self)
+
+        self.allocations[base_address] = allocation
+
+        base_end = base_address+size
+        consumed_allocations = filter(lambda x: not x == base_address and base_address <= x < base_end, self.allocations.keys())
+        consumed_allocations.sort()
+
+        for consumed_addr in consumed_allocations:
+            self.consume_address(consumed_addr, base_address, base_end) 
+
+        return allocation
+
+    def reallocate(self, address, size):
+        if not address in self.allocations:
+            raise AllocatorError('address was not allocated by allocator')
+
+        end_address = address+size
+        backing_alloc = self.backing_allocations[address]
+        backing_alloc.reallocate(size)
+
+        allocation = self.allocations[address]
+        allocation.size = size
+        end_address = address+size
+
+        consumed_allocations = filter(lambda x: not x == address and address <= x < end_address, self.allocations.keys())
+        consumed_allocations.sort()
+
+        for consumed_addr in consumed_allocations:
+            self.consume_address(consumed_addr, address, end_address)
+
+        return allocation
+    
+    def consume_address(self, consumed_address, start_address, end_address):
+        if not consumed_address in self.allocations:
+            raise AllocationError('consumed address not in allocations')
+
+        if not start_address in self.allocations:
+            raise AllocationError('start address not in allocations')
+
+        if not consumed_address >= start_address or not consumed_address < end_address:
+            raise AllocationError('consumed address not in the range of start and end')
+
+        allocation = self.backing_allocations[start_address]
+        size = end_address - start_address
+        
+        consumed_offset = consumed_address - start_address
+        consumed_alloc = self.allocations[consumed_address]
+        consumed_backer = self.backing_allocations[consumed_address]
+        consumed_size = consumed_alloc.size
+        consumed_end = consumed_address + consumed_size
+        consumed_offset_end = consumed_offset + consumed_size
+        consumed_addresses = filter(lambda x: x+consumed_offset < size, consumed_alloc.addresses.keys())
+            
+        # shift and save the overlapped address objects
+        for address_offset in consumed_addresses:
+            address_obj = consumed_alloc.addresses[address_offset]
+            address_obj.allocation = allocation
+            address_obj.offset += consumed_offset
+            allocation.addresses[consumed_offset+address_offset] = address_obj
+            del consumed_alloc.addresses[address_offset]
+
+        # do the same to the backing allocation
+        consumed_addresses = filter(lambda x: x+consumed_offset < size, consumed_backer.addresses.keys())
+            
+        # shift and save the overlapped address objects
+        for address_offset in consumed_addresses:
+            address_obj = consumed_backer.addresses[address_offset]
+            address_obj.allocation = allocation
+            address_obj.offset += consumed_offset
+            allocation.addresses[consumed_offset+address_offset] = address_obj
+            del consumed_backer.addresses[address_offset]
+                
+        consumed_blocks = filter(lambda x: x+consumed_offset < size, consumed_backer.blocks.keys())
+            
+        # save the overlapped blocks into our allocation
+        for block_offset in consumed_blocks:
+            block = consumed_backer.blocks[block_offset]
+            allocation.set_block(int(block.address), block, True)
+            del consumed_backer.blocks[block_offset]
+        
+        if consumed_end <= end_address:
+            consumed_data = consumed_backer.read_bytestring(consumed_alloc.id, force=True)
+            allocation.write_bytestring(allocation.id+consumed_offset, consumed_data, force=True)
+
+            consumed_backer.invalidate()
+            consumed_backer.free()
+            del self.backing_allocations[consumed_addr]
+
+            del self.allocations[consumed_addr]
+            return
+            
+        # this region only overlaps partially, move the beginning of the consumed region
+        # to the end of the new allocation
+        unconsumed_addresses = filter(lambda x: x+consumed_offset >= size, consumed_backer.addresses.keys())
+        unconsumed_blocks = filter(lambda x: x+consumed_offset >= size, consumed_backer.blocks.keys())
+        consumed_delta = size - consumed_offset
+
+        for unconsumed_offset in unconsumed_blocks:
+            new_offset = unconsumed_offset - consumed_delta
+            unconsumed_block = consumed_backer.blocks[unconsumed_offset]
+            consumed_alloc.blocks[new_offset] = unconsumed_block
+            del consumed_backer.blocks[unconsumed_offset]
+                    
+            unconsumed_block.address.allocation = consumed_alloc
+            unconsumed_block.address.offset -= consumed_delta
+
+        unconsumed_address = consumed_backer.id + consumed_delta
+        unconsumed_size = consumed_backer.size - consumed_delta
+        memmove(consumed_backer.id, unconsumed_address, unconsumed_size)
+        consumed_backer.reallocate(unconsumed_size)
+
+        del self.allocations[consumed_address]
+        self.allocations[end_address] = consumed_alloc
+
+        del self.backing_allocations[consumed_address]
+        self.backing_allocations[end_address] = consumed_backer
+
+    def free(self, address):
+        if address not in self.allocations:
+            raise AllocatorError('no such address allocated: 0x%x' % address)
+
+        allocation = self.allocations[address].value
+        backing_alloc = self.backing_allocations[address]
+        backing_alloc.invalidate()
+        backing_alloc.free()
+        del self.backing_allocations[address]
+
+        allocation.invalidate()
+        allocation.address = 0
+        allocation.size = 0
+        del self.allocations[address]
