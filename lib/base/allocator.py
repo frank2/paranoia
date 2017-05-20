@@ -26,7 +26,7 @@ heap = None
 
 __all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation'
            ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'VirtualAllocation',
-           'VirtualAllocator', 'heap', 'memory', 'disk', 'allocators']
+           'VirtualAllocator', 'heap', 'memory', 'allocators']
 
 class AllocatorError(ParanoiaError):
     pass
@@ -438,7 +438,7 @@ class VirtualAllocation(Allocation):
         backing_alloc = self.allocator.backing_allocations[self.id]
         return backing_alloc.get_block(mem_addr)
 
-    def get_block(self, id_val, block, force=False):
+    def set_block(self, id_val, block, force=False):
         self.check_id()
         self.check_id_range(id_val)
 
@@ -492,12 +492,17 @@ class VirtualAllocation(Allocation):
     
 class Allocator(ParanoiaAgent):
     BUFFER = True
+    ALLOCATION_CLASS = Allocation
     
     def __init__(self, **kwargs):
         global allocators
 
         self.buffer = kwargs.setdefault('buffer', self.BUFFER)
         self.allocations = AVLTree()
+        self.allocation_class = kwargs.setdefault('allocation_class', self.ALLOCATION_CLASS)
+
+        if not issubclass(self.allocation_class, Allocation):
+            raise AllocatorError('allocation class must subclass Allocation')
 
         allocators.add(self)
 
@@ -560,13 +565,15 @@ class Allocator(ParanoiaAgent):
                 return allocation
 
 class MemoryAllocator(Allocator):
+    ALLOCATION_CLASS = MemoryAllocation
+    
     def allocate(self, address):
         current = self.find(address)
 
         if not current is None:
             raise AllocatorError('address already has allocation')
 
-        self.allocations[address] = MemoryAllocation(id=address, size=1, allocator=self, buffer=self.buffer)
+        self.allocations[address] = self.allocation_class(id=address, size=1, allocator=self, buffer=self.buffer)
 
         return self.allocations[address].value
 
@@ -663,9 +670,9 @@ class HeapAllocator(Allocator):
         if self.zero_memory:
             memset(heap_address, 0, byte_length)
         
-        allocation = Allocation(id=heap_address
-                                ,size=byte_length
-                                ,allocator=self)
+        allocation = self.allocation_class(id=heap_address
+                                           ,size=byte_length
+                                           ,allocator=self)
         
         self.allocations[heap_address] = allocation
 
@@ -745,6 +752,7 @@ heap = HeapAllocator()
 BlockChain.ALLOCATOR = heap
 
 class VirtualAllocator(Allocator):
+    ALLOCATION_CLASS = VirtualAllocation
     ZERO_MEMORY = True
     BASE_ADDRESS = None
     MAXIMUM_OFFSET = None
@@ -766,8 +774,8 @@ class VirtualAllocator(Allocator):
             self.base_address <<= 40
 
             while self.base_address in base_addrs:
-                self.base_address = random.randrange(0x1000, 0x7FFF)
-                self.base_address <<= 48
+                self.base_address = random.randrange(0x100000, 0x7FFFFF)
+                self.base_address <<= 40
 
         if self.base_address in base_addrs:
             raise AllocatorError('base address already taken')
@@ -787,6 +795,18 @@ class VirtualAllocator(Allocator):
         delta = virtual_address - allocation.id
 
         return backing_alloc.id+delta
+
+    def address(self, offset):
+        offset_addr = self.offset_address(offset)
+
+        if offset_addr in self.allocations:
+            return self.allocations[offset_addr].value.address()
+        
+        allocation = self.find(offset_addr)
+
+        if not allocation is None:
+            offset = offset_addr - allocation.id
+            return allocation.address(offset)
 
     def allocate(self, offset, size):
         global heap
@@ -813,9 +833,9 @@ class VirtualAllocator(Allocator):
         base_address = self.offset_address(offset)
         self.backing_allocations[base_address] = backing_allocation
 
-        allocation = VirtualAllocation(id=base_address
-                                       ,size=size
-                                       ,allocator=self)
+        allocation = self.allocation_class(id=base_address
+                                           ,size=size
+                                           ,allocator=self)
 
         self.allocations[base_address] = allocation
 
@@ -858,7 +878,8 @@ class VirtualAllocator(Allocator):
         if not consumed_address >= start_address or not consumed_address < end_address:
             raise AllocationError('consumed address not in the range of start and end')
 
-        allocation = self.backing_allocations[start_address]
+        allocation = self.allocations[start_address].value
+        backing = self.backing_allocations[start_address]
         size = end_address - start_address
         
         consumed_offset = consumed_address - start_address
@@ -872,9 +893,9 @@ class VirtualAllocator(Allocator):
         # shift and save the overlapped address objects
         for address_offset in consumed_addresses:
             address_obj = consumed_alloc.addresses[address_offset]
-            address_obj.allocation = self
+            address_obj.allocation = allocation
             address_obj.offset += consumed_offset
-            self.addresses[consumed_offset+address_offset] = address_obj
+            allocation.addresses[consumed_offset+address_offset] = address_obj
             del consumed_alloc.addresses[address_offset]
 
         # do the same to the backing allocation
@@ -883,9 +904,9 @@ class VirtualAllocator(Allocator):
         # shift and save the overlapped address objects
         for address_offset in consumed_addresses:
             address_obj = consumed_backer.addresses[address_offset]
-            address_obj.allocation = allocation
+            address_obj.allocation = backing
             address_obj.offset += consumed_offset
-            allocation.addresses[consumed_offset+address_offset] = address_obj
+            backing.addresses[consumed_offset+address_offset] = address_obj
             del consumed_backer.addresses[address_offset]
                 
         consumed_blocks = filter(lambda x: x+consumed_offset < size, consumed_backer.blocks.keys())
@@ -893,18 +914,22 @@ class VirtualAllocator(Allocator):
         # save the overlapped blocks into our allocation
         for block_offset in consumed_blocks:
             block = consumed_backer.blocks[block_offset]
-            allocation.set_block(int(block.address), block, True)
+
+            # this might look like it shouldn't work, but it does, because its underlying
+            # address has been shifted to the new allocation!
+            backing.set_block(int(block.address), block, True)
+            
             del consumed_backer.blocks[block_offset]
         
         if consumed_end <= end_address:
             consumed_data = consumed_backer.read_bytestring(consumed_backer.id, force=True)
-            allocation.write_bytestring(allocation.id+consumed_offset, consumed_data, force=True)
+            backing.write_bytestring(backing.id+consumed_offset, consumed_data, force=True)
             consumed_alloc.free()
             return
         
         consumed_delta = size - consumed_offset
         consumed_data = consumed_backer.read_bytestring(consumed_backer.id, size=consumed_delta, force=True)
-        allocation.write_bytestring(allocation.id+consumed_offset, consumed_data, force=True)
+        backing.write_bytestring(allocation.id+consumed_offset, consumed_data, force=True)
             
         # this region only overlaps partially, move the beginning of the consumed region
         # to the end of the new allocation
@@ -967,272 +992,3 @@ class VirtualAllocator(Allocator):
         allocation.address = 0
         allocation.size = 0
         del self.allocations[address]
-
-class DiskError(ParanoiaError):
-    pass
-
-class DiskManager(ParanoiaAgent):
-    def __init__(self, **kwargs):
-        self.files = dict()
-        self.allocators = dict()
-
-    def open(self, filename, mode, buffer=False):
-        fp = open(filename, mode)
-        self.files[fp.fileno()] = fp
-
-        maximum = self.eof(fp.fileno())
-        self.allocators = DiskAllocator(buffer=buffer, maximum_offset=maximum)
-
-        return DiskData(fileno=fp.fileno(), manager=self)
-
-    def close(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        allocator = self.allocators[fileno]
-
-        for allocation_id in allocator.allocations:
-            allocation = allocator.allocations[allocation_id]
-            allocation.flush()
-        
-        self.files[fileno].close()
-        del self.files[fileno]
-        del self.allocators[fileno]
-
-    def flush(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        allocator = self.allocators[fileno]
-
-        for allocation_id in allocator.allocations:
-            allocation = allocator.allocations[allocation_id]
-            allocation.flush()
-
-    def next(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        line = self.readline(fileno)
-
-        if line is None:
-            raise StopIteration
-
-        return line
-
-    def read(self, fileno, size=None):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        offset = self.tell(fileno)
-        allocator = self.allocators[fileno]
-        address = allocator.offset_address(offset)
-        allocation = allocator.find(address)
-
-        if size is None:
-            eof = self.eof()
-            size = eof - offset
-
-        fp = self.files[fileno]
-        data = fp.read(size)
-        size = len(data)
-
-        if size == 0:
-            return
-        
-        if allocation is None:
-            allocation = allocator.allocate(offset, size)
-
-        allocation_offset = address - allocation.id
-        end_offset = allocation_offset + size
-
-        if end_offset > allocation.size:
-            allocation.reallocate(end_offset)
-
-        allocation.write_string(allocation.id+allocation_offset, data)
-
-        return (allocation.address(allocation_offset), size)
-
-    def readline(self, fileno, size=None):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-        
-        current_position = self.tell(fileno)
-        eof = self.eof()
-        fp = self.files[fileno]
-        char = None
-        data_read = 0
-        peek_position = current_position
-
-        while not char == '\n' and (size is None or data_read < size):
-            char = fp.read(1)
-            data_read += 1
-            peek_position += 1
-
-            if len(char) == 0:
-                break
-            
-            if peek_position == eof:
-                eof = self.eof()
-
-            if peek_position == eof:
-                break
-
-        self.seek(fileno, current_position)
-        return self.read(fileno, data_read)
-
-    def readlines(self, fileno, sizehint=None):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        current_position = self.tell(fileno)
-        eof = self.eof()
-
-        lines = list()
-        end_position = current_position
-        
-        while end_position < eof and (sizehint is None or sizehint > 0):
-            line = self.readline(fileno, sizehint)
-
-            if line is None:
-                break
-
-            lines.append(line)
-            line_addr, line_size = line
-
-            end_position += line_size
-
-            if end_position >= eof:
-                eof = self.eof()
-
-            if end_position >= eof:
-                break
-
-            if not sizehint is None:
-                sizehint -= line_size
-
-        return lines
-    
-    def seek(self, fileno, offset, whence=None):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-        
-        if whence is None:
-            whence = os.SEEK_SET
-
-        self.files[fileno].seek(offset, whence)
-
-    def tell(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        return self.files[fileno].tell()
-
-    def write(self, fileno, data):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        self.files[fileno].write(data)
-
-    def writelines(self, fileno, lines):
-        self.write(fileno, ''.join(lines))
-
-    def eof(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-        
-        current = self.tell(fileno)
-        self.seek(fileno, 0, os.SEEK_END)
-        eof = self.tell(fileno)
-        self.seek(fileno, current)
-
-        allocator = self.allocators[fileno]
-
-        if eof < allocator.maximum_offset:
-            raise DiskError('file truncated')
-        
-        allocator.maximum_offset = eof
-        
-        return eof
-
-    def closed(self, fileno):
-        if not fileno in self.files:
-            return True
-
-        return self.files[fileno].closed
-
-    def allocations(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-        allocator = self.allocators[fileno]
-
-        return allocator.allocations.values()
-
-    def allocator(self, fileno):
-        if not fileno in self.files:
-            raise DiskError('fileno not being managed')
-
-disk = DiskManager()
-
-class DiskData(ParanoiaAgent):
-    MANAGER = disk
-    FILENO = None
-    
-    def __init__(self, **kwargs):
-        self.manager = kwargs.setdefault('manager', self.MANAGER)
-
-        if self.manager is None:
-            raise DiskError('manager cannot be None')
-
-        if not isinstance(self.manager, DiskManager):
-            raise DiskError('manager must be a DiskManager instance')
-
-        self.fileno = kwargs.setdefault('fileno', self.FILENO)
-
-        if self.fileno is None:
-            raise DiskError('fileno cannot be None')
-
-    def close(self):
-        self.manager.close(self.fileno)
-        self.fileno = None
-
-    def flush(self):
-        self.manager.flush(self.fileno)
-
-    def next(self):
-        return self.manager.next(self.fileno)
-
-    def read(self, size=None):
-        return self.manager.read(self.fileno, size)
-
-    def readline(self, size=None):
-        return self.manager.readline(self.fileno, size)
-
-    def readlines(self, sizehint=None):
-        return self.manager.readlines(self.fileno, self.size)
-
-    def seek(self, offset, whence=None):
-        self.manager.seek(self.fileno, offset, whence)
-
-    def tell(self):
-        return self.manager.tell(self.fileno)
-
-    def write(self, data):
-        self.manager.write(self.fileno, data)
-
-    def writelines(self, lines):
-        self.manager.writelines(self.fileno, lines)
-
-    def eof(self):
-        return self.manager.eof(self.fileno)
-
-    def closed(self):
-        return self.manager.closed(self.fileno)
-
-    def allocations(self):
-        return self.manager.allocations(self.fileno)
-
-    def __iter__(self):
-        if not self.closed():
-            return self
