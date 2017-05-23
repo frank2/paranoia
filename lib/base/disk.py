@@ -2,56 +2,82 @@
 
 import os
 
+from paranoia.base.allocator import allocators, VirtualAllocator, VirtualAllocation, VirtualAddress
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
-from paranoia.base.allocator import allocators, VirtualAllocator, VirtualAllocation
-from paranoia.base.address import Address
+from paranoia.base.size import Size
 
-__all__ = ['DiskError', 'DiskAllocation', 'DiskAllocator', 'DiskManager', 'DiskData', 'manager', 'disk_file']
+__all__ = ['DiskError', 'DiskAddress', 'DiskAllocation', 'DiskAllocator', 'DiskManager'
+           ,'DiskHandle', 'manager', 'disk_handle']
            
 class DiskError(ParanoiaError):
     pass
 
-class DiskAllocation(VirtualAllocation):
-    DATAREF = None
-    
-    def __init__(self, **kwargs):
-        super(DiskAllocation, self).__init__(**kwargs)
+class DiskAddress(VirtualAddress):
+    def mirror(self, offset, data):
+        if self.allocator.handle.closed() or not self.allocator.handle.writable():
+            return
         
-        self.dataref = kwargs.setdefault('dataref', self.DATAREF)
+        ref = self.allocator.handle
+        curr = ref.tell()
+        ref.seek(offset)
+        ref.write(data)
+        ref.seek(curr)
 
+    def write_byte(self, value, offset=0):
+        super(DiskAddress, self).write_byte(value, offset)
+        self.mirror(int(self) - self.allocator.base_address + offset, chr(value))
+
+    def write_bytestring(self, string, offset=0, force=False, direct=False):
+        super(DiskAddress, self).write_bytestring(string, offset, force, direct)
+        self.mirror(int(self) - self.allocator.base_address + offset, string)
+
+    def write_string(self, string, offset=0, encoding='ascii', force=False, direct=False):
+        super(DiskAddress, self).write_string(string, offset, encoding, force, direct)
+        self.mirror(int(self) - self.allocator.base_address + offset, string)
+
+    def write_bytes(self, byte_list, offset=0, force=False, direct=False):
+        super(DiskAddress, self).write_bytes(byte_list, offset, force, direct)
+        self.mirror(int(self) - self.allocator.base_address + offset, bytearray(byte_list))
+
+    def write_bits(self, bit_list, bit_offset=0, force=False, direct=False):
+        super(DiskAddress, self).write_bits(bit_list, bit_offset, force, direct)
+        block_address = self.fork(int(bit_offset/8))
+        block_size = Size(bits=bit_offset % 8 + len(bit_list)).byte_length()
+        block_data = block_address.read_bytes(size=block_size)
+        self.mirror(int(self) - self.allocator.base_address + int(bit_offset/8), bytearray(block_data))
+
+class DiskAllocation(VirtualAllocation):
     def address(self, offset=0):
+        if offset >= self.size:
+            return self.allocator.address(offset)
+
         if not offset in self.addresses:
-            self.addresses[offset] = Address(offset=offset, allocation=self)
-
+            self.addresses[offset] = DiskAddress(offset=offset
+                                                 ,allocation=self
+                                                 ,allocator=self.allocator)
+        
         return self.addresses[offset]
-
-    def in_allocator_range(self, other_id, inclusive=False):
-        allocator_addr = self.allocator.base_address
-        allocator_end = allocator_addr+self.allocator.maximum_offset
-
-        if inclusive:
-            return allocator_addr <= other_id <= allocator_end
-        else:
-            return allocator_addr <= other_id < allocator_end
-
-    def check_allocator_range(self, other_id, inclusive=False):
-        if not self.in_allocator_range(other_id, inclusive):
-            raise DiskError('address out of range')
         
     def read_byte(self, id_val):
         self.check_id()
-        self.check_allocator_range(id_val)
 
         offset = id_val - self.allocator.base_address
 
         if offset > self.size: # data unread
-            self.dataref.seek(offset, os.SEEK_SET)
+            handle = self.allocator.handle
+
+            if handle.closed():
+                raise DiskError('offset out of range on unopened file')
+            
+            curr = handle.tell()
+            handle.seek(offset, os.SEEK_SET)
             pos = self.dataref.tell()
 
             if not pos == offset:
                 raise DiskError('offset exceeds backing file')
             
             data = self.dataref.read_address(1)
+            handle.seek(curr, os.SEEK_SET)
 
             if data is None:
                 raise EOFError
@@ -61,7 +87,10 @@ class DiskAllocation(VirtualAllocation):
             if size == 0:
                 raise EOFError
 
-            return ord(address.read_byte())
+            if not address.allocation == self:
+                return ord(address.read_byte())
+
+        self.allocator.check_range(id_val)
 
         mem_addr = self.allocator.memory_address(id_val)
         backing_alloc = self.allocator.backing_allocations[self.id]
@@ -74,18 +103,24 @@ class DiskAllocation(VirtualAllocation):
         alloc_offset = id_val - self.id
 
         if alloc_offset+1 > self.size: # buffer not large enough
+            if self.allocator.handle.closed() or not self.allocator.handle.writable():
+                raise DiskError('write exceeds file boundary while file is unwritable')
+            
             self.allocator.maximum_offset = file_offset+1
             self.reallocate(alloc_offset+1)
-            self.dataref.seek(file_offset, os.SEEK_SET)
+            handle = self.allocator.handle
+            curr = handle.tell()
+            handle.seek(file_offset, os.SEEK_SET)
             pos = self.dataref.tell()
 
             if not pos == file_offset:
                 zero_delta = file_offset - pos
-                self.dataref.write('\x00' * zero_delta, False)
+                self.handle.write('\x00' * zero_delta, False)
                 
-            self.dataref.write(chr(byte_val), False)
+            handle.write(chr(byte_val), False)
+            handle.seek(curr, os.SEEK_SET)
 
-        self.check_allocator_range(id_val)
+        self.allocator.check_range(id_val)
 
         mem_addr = self.allocator.memory_address(id_val)
         backing_alloc = self.allocator.backing_allocations[self.id]
@@ -93,21 +128,27 @@ class DiskAllocation(VirtualAllocation):
 
     def read_bytestring(self, id_val, size=None, force=False, direct=False):
         self.check_id()
-        self.check_allocator_range(id_val)
 
-        offset = id_val - self.id
+        offset = id_val - self.allocator.base_address
 
         if size is None:
-            size = self.size - offset
+            size = self.allocator.maximum_offset - offset
 
         if offset+size > self.size: # data unread
-            self.dataref.seek(offset, os.SEEK_SET)
-            pos = self.dataref.tell()
+            handle = self.allocator.handle
+
+            if handle.closed():
+                raise DiskError('offset and data size exceed boundaries of closed file')
+            
+            curr = handle.tell()
+            handle.seek(offset, os.SEEK_SET)
+            pos = handle.tell()
 
             if not pos == offset:
                 raise DiskError('offset exceeds backing file')
             
-            data = self.dataref.read_address(size)
+            data = handle.read_address(size)
+            handle.seek(curr, os.SEEK_SET)
 
             if data is None:
                 raise EOFError
@@ -117,7 +158,10 @@ class DiskAllocation(VirtualAllocation):
             if size == 0:
                 raise EOFError
 
-            return ord(address.read_bytestring(size))
+            if not address.allocation == self:
+                return ord(address.read_bytestring(size=size))
+
+        self.allocator.check_range(id_val)
 
         mem_addr = self.allocator.memory_address(id_val)
         backing_alloc = self.allocator.backing_allocations[self.id]
@@ -127,22 +171,28 @@ class DiskAllocation(VirtualAllocation):
         self.check_id()
 
         alloc_offset = id_val - self.id
+        file_offset = id_val - self.allocator.base_address
         size = len(string)
         
         if alloc_offset+size > self.size: # buffer too small
-            self.allocator.maximum_offset = offset+len(string)
-            self.reallocate(alloc_offset+size)
+            if self.allocator.handle.closed() or not self.allocator.handle.writable():
+                raise DiskError('write exceeds file boundary while file is unwritable')
             
-            self.dataref.seek(offset, os.SEEK_SET)
-            pos = self.dataref.tell()
+            handle = self.allocator.handle
+            self.allocator.maximum_offset = file_offset+len(string)
+            self.reallocate(alloc_offset+size)
+            curr = handle.tell()
+            handle.seek(file_offset, os.SEEK_SET)
+            pos = handle.tell()
 
-            if not pos == offset:
-                zero_delta = offset - pos
-                self.dataref.write_address('\x00' * zero_delta)
+            if not pos == file_offset:
+                zero_delta = file_offset - pos
+                handle.write('\x00' * zero_delta, False)
                 
-            self.dataref.write(string, False)
+            handle.write(string, False)
+            handle.seek(curr, os.SEEK_SET)
 
-        self.check_allocator_range(id_val)
+        self.allocator.check_range(id_val)
 
         mem_addr = self.allocator.memory_address(id_val)
         backing_alloc = self.allocator.backing_allocations[self.id]
@@ -184,6 +234,9 @@ class DiskAllocation(VirtualAllocation):
                 
             return
 
+        handle = self.allocator.handle
+        curr = handle.tell()
+
         for i in range(start_delta, end_delta+1):
             if not i == end_delta and i in backing_alloc.blocks and not backing_alloc.blocks[i].value is None and len(block_range) == 0:
                 block_range.append(i)
@@ -206,30 +259,32 @@ class DiskAllocation(VirtualAllocation):
                 string_address = ctypes.addressof(string_buffer)
 
                 memmove(backing_address+block_start, string_address, len(byte_array))
-                self.dataref.seek(file_delta + block_start, os.SEEK_SET)
-                self.dataref.write(byte_array, False)
+
+                if not handle.closed() and handle.writable():
+                    handle.seek(file_delta + block_start, os.SEEK_SET)
+                    handle.write(byte_array, False)
 
                 for i in range(*block_range):
                     backing_alloc.blocks[i].value = None
 
                 block_range = list()
 
+        handle.seek(curr, os.SEEK_SET)
+
 class DiskAllocator(VirtualAllocator):
     ALLOCATION_CLASS = DiskAllocation
-    DATAREF = None
+    HANDLE = None
 
     def __init__(self, **kwargs):
         super(DiskAllocator, self).__init__(**kwargs)
 
-        self.dataref = kwargs.setdefault('dataref', self.DATAREF)
+        self.handle = kwargs.setdefault('handle', self.HANDLE)
 
-        if self.dataref is None:
-            raise DiskError('dataref cannot be None')
+        if self.handle is None:
+            raise DiskError('handle cannot be None')
 
-    def allocate(self, offset, size):
-        result = super(DiskAllocator, self).allocate(offset, size)
-        result.dataref = self.dataref
-        return result
+        if not isinstance(self.handle, DiskHandle):
+            raise DiskError('handle must be a DiskHandle object')
 
 class DiskManager(ParanoiaAgent):
     def __init__(self, **kwargs):
@@ -243,26 +298,36 @@ class DiskManager(ParanoiaAgent):
                 fp.close()
                 
         fp = open(filename, mode)
-        self.files[fp.fileno()] = fp
+        return self.manage(fp)
 
-        fp.seek(0, os.SEEK_END)
-        maximum = fp.tell()
-        fp.seek(0, os.SEEK_SET)
+    def manage(self, file_object):
+        self.files[file_object.fileno()] = file_object
+
+        file_object.seek(0, os.SEEK_END)
+        maximum = file_object.tell()
+        file_object.seek(0, os.SEEK_SET)
         
-        handle = DiskData(fileno=fp.fileno(), manager=self)
-        self.allocators[fp.fileno()] = DiskAllocator(buffer=buffer
-                                                     ,maximum_offset=maximum
-                                                     ,dataref=handle)
+        handle = DiskHandle(fileno=file_object.fileno(), manager=self)
+        self.allocators[file_object.fileno()] = DiskAllocator(buffer=buffer
+                                                              ,maximum_offset=maximum
+                                                              ,handle=handle)
 
         return handle
 
-    def close(self, fileno):
+    def close(self, fileno, destroy=True):
         if not fileno in self.files:
             raise DiskError('fileno not being managed')
         
         self.flush(fileno)
         self.files[fileno].close()
         del self.files[fileno]
+
+        if destroy:
+            allocator = self.allocators[fileno]
+
+            for address in allocator.allocations:
+                allocator.free(address)
+                
         del self.allocators[fileno]
 
     def flush(self, fileno):
@@ -405,6 +470,22 @@ class DiskManager(ParanoiaAgent):
     def writelines(self, fileno, lines):
         self.write(fileno, ''.join(lines))
 
+    def readable(self, fileno):
+        if not fileno in self.files:
+            raise DiskError('fileno not being managed')
+
+        mode = self.files[fileno].mode
+        
+        return 'r' in mode or '+' in mode
+
+    def writable(self, fileno):
+        if not fileno in self.files:
+            raise DiskError('fileno not being managed')
+
+        mode = self.files[fileno].mode
+        
+        return 'w' in mode or '+' in mode or 'a' in mode
+        
     def eof(self, fileno):
         if not fileno in self.files:
             raise DiskError('fileno not being managed')
@@ -424,7 +505,7 @@ class DiskManager(ParanoiaAgent):
         return eof
 
     def closed(self, fileno):
-        if not fileno in self.files:
+        if fileno is None or not fileno in self.files:
             return True
 
         return self.files[fileno].closed
@@ -445,7 +526,7 @@ class DiskManager(ParanoiaAgent):
 
 manager = DiskManager()
 
-class DiskData(ParanoiaAgent):
+class DiskHandle(ParanoiaAgent):
     MANAGER = manager
     FILENO = None
     
@@ -463,8 +544,8 @@ class DiskData(ParanoiaAgent):
         if self.fileno is None:
             raise DiskError('fileno cannot be None')
 
-    def close(self):
-        self.manager.close(self.fileno)
+    def close(self, destroy=True):
+        self.manager.close(self.fileno, destroy)
         self.fileno = None
 
     def flush(self):
@@ -538,6 +619,12 @@ class DiskData(ParanoiaAgent):
     def writelines(self, data, mirror=True):
         self.writelines_address(data, mirror)
 
+    def readable(self):
+        return self.manager.readable(self.fileno)
+
+    def writable(self):
+        return self.manager.writable(self.fileno)
+
     def mirror(self, offset, data):
         allocator = self.manager.allocators[self.fileno]
 
@@ -575,12 +662,23 @@ class DiskData(ParanoiaAgent):
         allocator = self.allocator()
         return allocator.address(offset)
 
-    def allocate(self, offset, size):
+    def allocate(self, offset=0, size=None):
+        if size is None:
+            size = self.eof() - offset
+
+        allocator = self.allocator()
+        alloc_addr = allocator.offset_address(offset)
+        allocation = allocator.find(alloc_addr)
+
+        if not allocation is None:
+            raise DiskError('offset already allocated')
+
+        return allocator.allocate(offset, size)
 
     def __iter__(self):
         if not self.closed():
             return self
 
-def disk_file(filename, mode):
+def disk_handle(filename, mode):
     global manager
     return manager.open(filename, mode)

@@ -16,7 +16,7 @@ from yggdrasil import AVLTree
 
 from paranoia.fundamentals import align, string_address, malloc, realloc, free, hexdump
 from paranoia.fundamentals import memset, memmove
-from paranoia.base.address import Address
+from paranoia.base.address import Address, AddressError
 from paranoia.base.block import Block, BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 
@@ -25,8 +25,8 @@ memory = None
 heap = None
 
 __all__ = ['AllocatorError', 'AllocationError', 'Allocator', 'Allocation'
-           ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'VirtualAllocation',
-           'VirtualAllocator', 'heap', 'memory', 'allocators']
+           ,'MemoryAllocator', 'HeapAllocator', 'MemoryAllocation', 'VirtualAllocation'
+           ,'VirtualAllocator', 'VirtualAddress', 'heap', 'memory', 'allocators']
 
 class AllocatorError(ParanoiaError):
     pass
@@ -376,120 +376,9 @@ class Allocation(ParanoiaAgent):
         self.set_block(self.id + index, block_value)
 
     def __del__(self):
-        self.free()
+        if self.id in self.allocator.allocations:
+            self.free()
 
-class MemoryAllocation(Allocation):
-    def check_id_range(self, id_val):
-        if id_val < self.id:
-            raise AllocationError('id not in range')
-
-        size_at = id_val - self.id + 1
-        
-        if size_at > self.size:
-            self.reallocate(size_at)
-
-        return super(MemoryAllocation, self).check_id_range(id_val)
-    
-    def read_bytestring(self, id_val, size=None, force=False, direct=False):
-        if id_val < self.id:
-            raise AllocationError('bad id value')
-
-        delta = id_val - self.id
-
-        if size is None:
-            size = self.size - delta
-
-        new_size = delta+size
-
-        if new_size > self.size:
-            self.reallocate(new_size)
-
-        return super(MemoryAllocation, self).read_bytestring(id_val, size, force, direct)
-
-    def write_bytestring(self, id_val, string, force=False, direct=False):
-        if id_val < self.id:
-            raise AllocationError('bad id value')
-
-        delta = id_val - self.id
-        size = len(string)
-        new_size = delta+size
-
-        if new_size > self.size:
-            self.rellocate(new_size)
-
-        return super(MemoryAllocation, self).write_bytestring(id_val, string, force, direct)
-
-class VirtualAllocation(Allocation):
-    def hexdump(self, label=None):
-        self.check_id()
-        
-        backing_alloc = self.allocator.backing_allocations[self.id]
-
-        if not label:
-            label = '<Virtual:%X>' % self.id
-
-        backing_alloc.hexdump(label)
-
-    def get_block(self, id_val, force=False):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.get_block(mem_addr)
-
-    def set_block(self, id_val, block, force=False):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.set_block(mem_addr, block, force)
-        
-    def read_byte(self, id_val):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.read_byte(mem_addr)
-    
-    def write_byte(self, id_val, byte_val):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.write_byte(mem_addr, byte_val)
-
-    def read_bytestring(self, id_val, size=None, force=False, direct=False):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.read_bytestring(mem_addr, size=size, force=force, direct=direct)
-
-    def write_bytestring(self, id_val, string, force=False, direct=False):
-        self.check_id()
-        self.check_id_range(id_val)
-
-        mem_addr = self.allocator.memory_address(id_val)
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.write_bytestring(mem_addr, string, force=force, direct=direct)
-
-    def flush(self, id_val=None, size=None):
-        if not id_val is None:
-            self.check_id()
-            self.check_id_range(id_val)
-
-            mem_addr = self.allocation.memory_address(id_val)
-        else:
-            mem_addr = id_val
-
-        backing_alloc = self.allocator.backing_allocations[self.id]
-        return backing_alloc.flush(mem_addr, size)
-    
 class Allocator(ParanoiaAgent):
     BUFFER = True
     ALLOCATION_CLASS = Allocation
@@ -554,6 +443,9 @@ class Allocator(ParanoiaAgent):
         if not allocators is None:
             allocators.remove(self)
 
+        for address in self.allocations:
+            self.free(address)
+
     @staticmethod
     def find_all(address):
         global allocators
@@ -563,6 +455,47 @@ class Allocator(ParanoiaAgent):
 
             if not allocation is None:
                 return allocation
+
+class MemoryAllocation(Allocation):
+    def check_id_range(self, id_val):
+        if id_val < self.id:
+            raise AllocationError('id not in range')
+
+        size_at = id_val - self.id + 1
+        
+        if size_at > self.size:
+            self.reallocate(size_at)
+
+        return super(MemoryAllocation, self).check_id_range(id_val)
+    
+    def read_bytestring(self, id_val, size=None, force=False, direct=False):
+        if id_val < self.id:
+            raise AllocationError('bad id value')
+
+        delta = id_val - self.id
+
+        if size is None:
+            size = self.size - delta
+
+        new_size = delta+size
+
+        if new_size > self.size:
+            self.reallocate(new_size)
+
+        return super(MemoryAllocation, self).read_bytestring(id_val, size, force, direct)
+
+    def write_bytestring(self, id_val, string, force=False, direct=False):
+        if id_val < self.id:
+            raise AllocationError('bad id value')
+
+        delta = id_val - self.id
+        size = len(string)
+        new_size = delta+size
+
+        if new_size > self.size:
+            self.rellocate(new_size)
+
+        return super(MemoryAllocation, self).write_bytestring(id_val, string, force, direct)
 
 class MemoryAllocator(Allocator):
     ALLOCATION_CLASS = MemoryAllocation
@@ -673,7 +606,7 @@ class HeapAllocator(Allocator):
         allocation = self.allocation_class(id=heap_address
                                            ,size=byte_length
                                            ,allocator=self)
-        
+
         self.allocations[heap_address] = allocation
 
         return allocation
@@ -741,15 +674,211 @@ class HeapAllocator(Allocator):
         free(address)
         allocation.address = 0
         allocation.size = 0
-        
-        del self.allocations[address]
 
-    def __del__(self):
-        for address in self.allocations:
-            self.free(address)
+        del self.allocations[address]
 
 heap = HeapAllocator()
 BlockChain.ALLOCATOR = heap
+
+class VirtualAddressError(AddressError):
+    pass
+
+class VirtualAddress(Address):
+    ALLOCATOR = None
+    
+    def __init__(self, **kwargs):
+        super(VirtualAddress, self).__init__(**kwargs)
+
+        self.allocator = kwargs.setdefault('allocator', self.ALLOCATOR)
+        
+        if self.allocation is None and self.allocator is None:
+            raise VirtualAddressError('both the allocation and the allocator cannot be None')
+
+        if not self.allocator is None and not isinstance(self.allocator, VirtualAllocator):
+            raise VirtualAddressError('allocator must be a VirtualAllocator instance')
+
+    def reverse_allocate(self, size):
+        if self.allocator is None:
+            raise VirtualAddressError('allocator cannot be None for reverse allocation')
+        
+        if not self.allocation is None:
+            del self.allocation.addresses[self.offset]
+
+        self.allocation = self.allocator.allocate(self.offset, size)
+        self.allocation.addresses[self.offset] = self
+
+    def ensure_allocation(self, offset=None, size=None):
+        if offset is None:
+            offset = self.offset
+        else:
+            offset = self.offset+offset
+            
+        if size is None:
+            if not self.allocation is None:
+                size = self.allocation.size - offset
+            elif not self.allocator is None:
+                size = self.allocator.maximum_offset - offset
+            else:
+                raise VirtualAddressError('allocator and allocation cannot be None')
+
+        if self.allocation is None:
+            self.reverse_allocate(size)
+        elif offset+size >= self.allocation.size:
+            self.allocation.reallocate(offset+size)
+
+    def valid(self, inclusive=False):
+        if not self.allocation is None:
+            return self.allocation.in_range(int(self), inclusive)
+        elif not self.allocator is None:
+            return self.allocator.in_range(int(self), inclusive)
+        else:
+            return False
+
+    def fork(self, offset):
+        if not self.allocation is None:
+            return self.allocation.address(self.offset+offset)
+        elif not self.allocator is None:
+            return self.allocator.address(self.offset+offset)
+        else:
+            raise VirtualAddressError('cannot fork with no allocation or allocator')
+
+    def copy(self):
+        return self.__class__(offset=self.offset
+                              ,allocation=self.allocation
+                              ,allocator=self.allocator)
+
+    def get_block(self, offset=0, force=False):
+        self.ensure_allocation(offset, 1)
+        return super(VirtualAddress, self).get_block(offset, force)
+
+    def set_block(self, block, offset=0, force=False):
+        self.ensure_allocation(offset, 1)
+        return super(VirtualAddress, self).set_block(block, offset, force)
+
+    def read_byte(self, offset=0):
+        self.ensure_allocation(offset, 1)
+        return super(VirtualAddress, self).read_byte(offset)
+
+    def write_byte(self, value, offset=0):
+        self.ensure_allocation(offset, 1)
+        return super(VirtualAddress, self).write_byte(value, offset)
+
+    def read_bytestring(self, offset=0, size=None, force=False, direct=False):
+        self.ensure_allocation(offset, size)
+        return super(VirtualAddress, self).read_bytestring(offset, size, force, direct)
+
+    def read_string(self, offset=0, size=None, encoding='ascii', force=False, direct=False):
+        self.ensure_allocation(offset, size)
+        return super(VirtualAddress, self).read_string(offset, size, encoding, force, direct)
+
+    def read_bytes(self, offset=0, size=None, force=False, direct=False):
+        self.ensure_allocation(offset, size)
+        return super(VirtualAddress, self).read_bytes(offset, size, force, direct)
+
+    def read_bits(self, bit_offset=0, size=None, force=False, direct=False):
+        self.ensure_allocation(bit_offset/8, size)
+        return super(VirtualAddress, self).read_bits(bit_offset, size, force, direct)
+
+    def write_bytestring(self, string, offset=0, force=False, direct=False):
+        self.ensure_allocation(offset, len(string))
+        return super(VirtualAddress, self).write_bytestring(string, offset, force, direct)
+
+    def write_string(self, string, offset=0, encoding='ascii', force=False, direct=False):
+        self.ensure_allocation(offset, len(string))
+        return super(VirtualAddress, self).write_string(string, offset, encoding, force, direct)
+
+    def write_bytes(self, byte_list, offset=0, force=False, direct=False):
+        self.ensure_allocation(offset, len(byte_list))
+        return super(VirtualAddress, self).read_bytes(byte_list, offset, force, direct)
+
+    def write_bits(self, bit_list, bit_offset=0, size=None, force=False, direct=False):
+        self.ensure_allocation(bit_offset/8, Size(size=bit_offset % 8 + len(bit_list)).byte_length())
+        return super(VirtualAddress, self).write_bits(bit_list, bit_offset, force, direct)
+
+class VirtualAllocation(Allocation):
+    def address(self, offset=0):
+        if offset >= self.size:
+            return self.allocator.address(offset)
+
+        if not offset in self.addresses:
+            self.addresses[offset] = VirtualAddress(offset=offset
+                                                    ,allocation=self
+                                                    ,allocator=self.allocator)
+
+        return self.addresses[offset]
+    
+    def hexdump(self, label=None):
+        self.check_id()
+        
+        backing_alloc = self.allocator.backing_allocations[self.id]
+
+        if not label:
+            label = '<Virtual:%X>' % self.id
+
+        backing_alloc.hexdump(label)
+
+    def get_block(self, id_val, force=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.get_block(mem_addr)
+
+    def set_block(self, id_val, block, force=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.set_block(mem_addr, block, force)
+        
+    def read_byte(self, id_val):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.read_byte(mem_addr)
+    
+    def write_byte(self, id_val, byte_val):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.write_byte(mem_addr, byte_val)
+
+    def read_bytestring(self, id_val, size=None, force=False, direct=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.read_bytestring(mem_addr, size=size, force=force, direct=direct)
+
+    def write_bytestring(self, id_val, string, force=False, direct=False):
+        self.check_id()
+        self.check_id_range(id_val)
+
+        mem_addr = self.allocator.memory_address(id_val)
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.write_bytestring(mem_addr, string, force=force, direct=direct)
+
+    def flush(self, id_val=None, size=None):
+        if not id_val is None:
+            self.check_id()
+            self.check_id_range(id_val)
+
+            mem_addr = self.allocation.memory_address(id_val)
+        else:
+            mem_addr = id_val
+
+        backing_alloc = self.allocator.backing_allocations[self.id]
+        return backing_alloc.flush(mem_addr, size)
+
+class VirtualAllocatorError(AllocatorError):
+    pass
 
 class VirtualAllocator(Allocator):
     ALLOCATION_CLASS = VirtualAllocation
@@ -778,9 +907,22 @@ class VirtualAllocator(Allocator):
                 self.base_address <<= 40
 
         if self.base_address in base_addrs:
-            raise AllocatorError('base address already taken')
+            raise VirtualAllocatorError('base address already taken')
 
         self.backing_allocations = dict()
+
+    def in_range(self, other_id, inclusive=False):
+        allocator_addr = self.base_address
+        allocator_end = allocator_addr+self.maximum_offset
+
+        if inclusive:
+            return allocator_addr <= other_id <= allocator_end
+        else:
+            return allocator_addr <= other_id < allocator_end
+
+    def check_range(self, other_id, inclusive=False):
+        if not self.in_range(other_id, inclusive):
+            raise DiskError('address out of range')
 
     def offset_address(self, offset):
         return self.base_address + offset
@@ -796,7 +938,10 @@ class VirtualAllocator(Allocator):
 
         return backing_alloc.id+delta
 
-    def address(self, offset):
+    def address(self, offset=0):
+        if offset >= self.maximum_offset:
+            raise VirtualAllocatorError('offset %d greater or eqaul to maximum offset %d' % (offset, self.maximum_offset))
+        
         offset_addr = self.offset_address(offset)
 
         if offset_addr in self.allocations:
@@ -807,6 +952,8 @@ class VirtualAllocator(Allocator):
         if not allocation is None:
             offset = offset_addr - allocation.id
             return allocation.address(offset)
+
+        return VirtualAddress(offset=offset, allocator=self)
 
     def allocate(self, offset, size):
         global heap
