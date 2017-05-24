@@ -304,12 +304,6 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             return 0
 
         root = self.current_offsets.tail
-
-        if root is None:
-            print self.current_offsets.root
-            raise RuntimeError('FUCK')
-            return 0
-        
         start = root.label
         offset = start + root.size(self.subregions).bits
         return offset
@@ -666,6 +660,39 @@ class Region(BlockChain):
             return
         
         self.declaration.set_size(size)
+
+    def dump(self):
+        self.flush()
+        
+        offset_list = list(self.declaration.current_offsets.in_order_traversal())
+        data = []
+
+        for i in xrange(len(offset_list)):
+            offset_ids = offset_list[i].value.keys()
+            offset_ids.sort(lambda x,y: cmp(self.declaration.subregions[y].size(),self.declaration.subregions[x].size()))
+            max_decl = self.declaration.subregions[offset_ids[0]]
+
+            if max_decl.instance is None:
+                max_decl.instantiate()
+
+            for bit in max_decl.instance.bit_iterator():
+                data.append(bit)
+
+            if i+1 >= len(offset_list):
+                continue
+            
+            next_offset = offset_list[i+1].label
+            current_offset = offset_list[i].label
+            current_end = current_offset + int(max_decl.size())
+            padding = next_offset - current_end
+
+            if padding < 0: # overlaps with another object
+                data = data[:padding]
+            else:
+                for i in xrange(padding):
+                    data.append(0)
+
+        self.address.write_bits(data, bit_offset=self.shift, force=True)
 
     def parse_bit_data(self, bit_data):
         parsed = self.declaration.bit_parser(bit_data=bit_data)
