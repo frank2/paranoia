@@ -61,7 +61,15 @@ class Block(ParanoiaAgent):
         if not 0 <= bit_offset < 8:
             raise BlockError('bit offset must be 0 <= offset < 8')
 
-        return (self.get_value(force) >> (7 - bit_offset)) & 1
+        if force or not self.buffer:
+            value = self.get_value(force)
+        else:
+            value = self.value
+
+        if value is None:
+            value = 0
+            
+        return (value >> (7 - bit_offset)) & 1
 
     def set_bit(self, bit_offset, bit_value, force=False):
         if not 0 <= bit_offset < 8:
@@ -70,7 +78,14 @@ class Block(ParanoiaAgent):
         if not 0 <= bit_value <= 1:
             raise BlockError('bit must be between 0 and 1')
 
-        value = self.get_value(force)
+        if force or not self.buffer:
+            value = self.get_value(force)
+        else:
+            value = self.value
+
+        if value is None:
+            value = 0
+            
         mask = 1 << (7 - bit_offset)
 
         if bit_value == 1:
@@ -78,7 +93,10 @@ class Block(ParanoiaAgent):
         else:
             value &= ~mask
 
-        self.set_value(value, force)
+        if force or not self.buffer:
+            self.set_value(value, force)
+        else:
+            self.value = value
 
     def flush(self):
         if self.value is None or self.address is None:

@@ -417,7 +417,7 @@ class Allocator(ParanoiaAgent):
         self.allocations[address].value.invalidate()
         del self.allocations[address]
 
-    def find(self, address):
+    def find(self, address, inclusive=False):
         if address in self.allocations:
             return self.allocations[address].value
 
@@ -427,7 +427,9 @@ class Allocator(ParanoiaAgent):
         while not node is None:
             allocation = node.value
 
-            if address >= allocation.id and address < allocation.id+allocation.size:
+            if not inclusive and address >= allocation.id and address < allocation.id+allocation.size:
+                return allocation
+            elif inclusive and address >= allocation.id and address <= allocation.id+allocation.size:
                 return allocation
 
             branch = node.branch_function(address, node.label)
@@ -722,8 +724,16 @@ class VirtualAddress(Address):
                 raise VirtualAddressError('allocator and allocation cannot be None')
 
         if self.allocation is None:
-            self.reverse_allocate(size)
-        elif offset+size >= self.allocation.size:
+            offset_address = self.allocator.offset_address(offset)
+            self.allocation = self.allocator.find(offset_address)
+
+            if self.allocation is None:
+                self.reverse_allocate(size)
+            else:
+                offset = offset_address - self.allocation.id
+                self.offset = offset - self.offset
+            
+        if offset+size >= self.allocation.size:
             self.allocation.reallocate(offset+size)
 
     def valid(self, inclusive=False):

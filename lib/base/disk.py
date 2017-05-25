@@ -391,7 +391,7 @@ class DiskManager(ParanoiaAgent):
             raise DiskError('fileno not being managed')
         
         current_position = self.tell(fileno)
-        eof = self.eof()
+        eof = self.eof(fileno)
         fp = self.files[fileno]
         char = None
         data_read = 0
@@ -406,7 +406,7 @@ class DiskManager(ParanoiaAgent):
                 break
             
             if peek_position == eof:
-                eof = self.eof()
+                eof = self.eof(fileno)
 
             if peek_position == eof:
                 break
