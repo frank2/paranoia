@@ -23,6 +23,14 @@ class DiskAddress(VirtualAddress):
         ref.write(data)
         ref.seek(curr)
 
+    def fork(self, offset):
+        alloc_offset = int(self)+offset - self.allocator.base_address
+        
+        if self.allocator.handle.writable() and alloc_offset > self.allocator.maximum_offset:
+            self.allocator.maximum_offset = alloc_offset
+
+        return super(DiskAddress, self).fork(offset)
+
     def write_byte(self, value, offset=0):
         super(DiskAddress, self).write_byte(value, offset)
         self.mirror(int(self) - self.allocator.base_address + offset, chr(value))
@@ -286,10 +294,28 @@ class DiskAllocator(VirtualAllocator):
         if not isinstance(self.handle, DiskHandle):
             raise DiskError('handle must be a DiskHandle object')
 
+    def address(self, offset=0):
+        if offset > self.maximum_offset and not self.handle.writable():
+            raise DiskError('offset %d greater than maximum offset %d' % (offset, self.maximum_offset))
+        
+        offset_addr = self.offset_address(offset)
+
+        if offset_addr in self.allocations:
+            return self.allocations[offset_addr].value.address()
+        
+        allocation = self.find(offset_addr)
+
+        if not allocation is None:
+            offset = offset_addr - allocation.id
+            return allocation.address(offset)
+
+        return DiskAddress(offset=offset, allocator=self)
+
 class DiskManager(ParanoiaAgent):
     def __init__(self, **kwargs):
         self.files = dict()
         self.allocators = dict()
+        self.last_eof = dict()
 
     def open(self, filename, mode, buffer=False):
         if 'r' in mode and 'w' in mode or '+' in mode:
@@ -329,6 +355,9 @@ class DiskManager(ParanoiaAgent):
                 allocator.free(address)
                 
         del self.allocators[fileno]
+
+        if fileno in self.last_eof:
+            del self.last_eof[fileno]
 
     def flush(self, fileno):
         if not fileno in self.files:
@@ -495,11 +524,12 @@ class DiskManager(ParanoiaAgent):
         eof = self.tell(fileno)
         self.seek(fileno, current)
 
-        allocator = self.allocators[fileno]
-
-        if eof < allocator.maximum_offset:
+        if not fileno in self.last_eof:
+            self.last_eof[fileno] = eof
+        elif eof < self.last_eof[fileno]:
             raise DiskError('file truncated')
-        
+
+        allocator = self.allocators[fileno]
         allocator.maximum_offset = eof
         
         return eof
@@ -639,7 +669,10 @@ class DiskHandle(ParanoiaAgent):
         elif offset+len(data) > allocation.size:
             allocation.reallocate(offset+len(data))
 
-        allocation.write_string(offset_address, data)
+        if isinstance(data, (bytearray, bytes)):
+            allocation.write_bytestring(offset_address, data)
+        elif isinstance(data, (str, unicode)):
+            allocation.write_string(offset_address, data)
 
         return (allocation.address(offset_address - allocation.id), len(data))
 

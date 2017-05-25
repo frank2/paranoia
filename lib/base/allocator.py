@@ -19,6 +19,7 @@ from paranoia.fundamentals import memset, memmove
 from paranoia.base.address import Address, AddressError
 from paranoia.base.block import Block, BlockChain
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
+from paranoia.base.size import Size
 
 allocators = set()
 memory = None
@@ -663,7 +664,7 @@ class HeapAllocator(Allocator):
 
         del self.allocations[address]
         self.allocations[new_address] = allocation
-        
+
         return allocation
 
     def free(self, address):
@@ -698,6 +699,15 @@ class VirtualAddress(Address):
 
         if not self.allocator is None and not isinstance(self.allocator, VirtualAllocator):
             raise VirtualAddressError('allocator must be a VirtualAllocator instance')
+
+    def value(self):
+        if self.allocation is None:
+            return self.allocator.base_address + self.offset
+        else:
+            return self.allocation.id + self.offset
+
+    def set_offset(self, value):
+        self.offset = value
 
     def reverse_allocate(self, size):
         if self.allocator is None:
@@ -745,7 +755,7 @@ class VirtualAddress(Address):
             return False
 
     def fork(self, offset):
-        if not self.allocation is None:
+        if not self.allocation is None and self.offset+offset <= self.allocation.size:
             return self.allocation.address(self.offset+offset)
         elif not self.allocator is None:
             return self.allocator.address(self.offset+offset)
@@ -801,11 +811,34 @@ class VirtualAddress(Address):
         self.ensure_allocation(offset, len(byte_list))
         return super(VirtualAddress, self).read_bytes(byte_list, offset, force, direct)
 
-    def write_bits(self, bit_list, bit_offset=0, size=None, force=False, direct=False):
-        self.ensure_allocation(bit_offset/8, Size(size=bit_offset % 8 + len(bit_list)).byte_length())
+    def write_bits(self, bit_list, bit_offset=0, force=False, direct=False):
+        self.ensure_allocation(bit_offset/8, Size(bits=bit_offset % 8 + len(bit_list)).byte_length())
         return super(VirtualAddress, self).write_bits(bit_list, bit_offset, force, direct)
 
+    def flush(self, offset=0, size=None):
+        if self.allocation is None:
+            return
+
+        super(VirtualAddress, self).flush(offset, size)
+
+class VirtualAllocationError(AllocationError):
+    pass
+
 class VirtualAllocation(Allocation):
+    def check_id_range(self, id_val):
+        result = super(VirtualAllocation, self).in_range(id_val)
+
+        if not result:
+            result = self.allocator.in_range(id_val)
+
+            if not result and not self.allocator.handle.writable():
+                raise VirtualAllocationError('id out of range')
+
+            size_at = id_val - self.allocator.base_address + 1
+
+            if size_at > self.size:
+                self.reallocate(size_at)
+            
     def address(self, offset=0):
         if offset >= self.size:
             return self.allocator.address(offset)
@@ -949,8 +982,8 @@ class VirtualAllocator(Allocator):
         return backing_alloc.id+delta
 
     def address(self, offset=0):
-        if offset >= self.maximum_offset:
-            raise VirtualAllocatorError('offset %d greater or eqaul to maximum offset %d' % (offset, self.maximum_offset))
+        if offset > self.maximum_offset:
+            raise VirtualAllocatorError('offset %d greater than maximum offset %d' % (offset, self.maximum_offset))
         
         offset_addr = self.offset_address(offset)
 
@@ -1086,7 +1119,7 @@ class VirtualAllocator(Allocator):
         
         consumed_delta = size - consumed_offset
         consumed_data = consumed_backer.read_bytestring(consumed_backer.id, size=consumed_delta, force=True)
-        backing.write_bytestring(allocation.id+consumed_offset, consumed_data, force=True)
+        backing.write_bytestring(backing.id+consumed_offset, consumed_data, force=True)
             
         # this region only overlaps partially, move the beginning of the consumed region
         # to the end of the new allocation
@@ -1096,7 +1129,7 @@ class VirtualAllocator(Allocator):
             new_offset = unconsumed_offset - consumed_delta
             unconsumed_address = consumed_alloc.addresses[unconsumed_offset]
             consumed_alloc.addresses[new_offset] = unconsumed_address
-            del consumed_alloc.address[unconsumed_offset]
+            del consumed_alloc.addresses[unconsumed_offset]
 
             unconsumed_address.allocation = consumed_alloc
             unconsumed_address.offset -= consumed_delta
@@ -1108,7 +1141,7 @@ class VirtualAllocator(Allocator):
             new_offset = unconsumed_offset - consumed_delta
             unconsumed_address = consumed_backer.addresses[unconsumed_offset]
             consumed_backer.addresses[new_offset] = unconsumed_address
-            del consumed_backer.address[unconsumed_offset]
+            del consumed_backer.addresses[unconsumed_offset]
 
             unconsumed_address.allocation = consumed_backer
             unconsumed_address.offset -= consumed_delta

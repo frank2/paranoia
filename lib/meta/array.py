@@ -214,6 +214,8 @@ class Array(Region):
         
     @classmethod
     def subclass(cls, **kwargs):
+        kwargs.setdefault('declaration_class', cls.DECLARATION_CLASS)
+        kwargs.setdefault('resize_event', cls.RESIZE_EVENT)
         kwargs.setdefault('base_declaration', cls.BASE_DECLARATION)
         kwargs.setdefault('elements', cls.ELEMENTS)
 
