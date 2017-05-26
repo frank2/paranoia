@@ -155,6 +155,10 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         self.trigger_event(NewAddressEvent, address, shift)
 
     def set_shift(self, shift):
+        from paranoia.base.size import Size
+        
+        if isinstance(shift, Size):
+            raise RegionDeclarationError('GOTCHA FUCKER')
         if self.instance is None:
             self.set_arg('shift', shift)
         else:
@@ -167,6 +171,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         old_size = self.get_arg('size')
 
+        if old_size is None:
+            old_size = 0
+
         if not self.instance is None:
             # call the BlockChain version of the function to prevent an infinite
             # loop
@@ -178,7 +185,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 self.rebase(self.instance.address, self.get_arg('shift'))
         else:
             self.set_arg('size', size)
-        
+
         self.trigger_event(NewSizeEvent, old_size, size)
 
     def is_bound(self):
@@ -225,8 +232,9 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
     def get_value(self, **kwargs):
         if not self.instance is None:
             force = kwargs.setdefault('force', False)
-            return self.instance.get_value(force)
-        
+            value = self.instance.get_value(force)
+            return value
+                    
         value = self.get_arg('value')
 
         if value is None:
@@ -305,8 +313,11 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
         root = self.current_offsets.tail
         start = root.label
-        offset = start + root.size(self.subregions).bits
+        offset = start + int(root.size(self.subregions))
         return offset
+
+    def next_address(self):
+        return self.bit_offset_to_base(self.next_subregion_offset())
     
     def has_subregion(self, decl):
         if not isinstance(decl, RegionDeclaration):
@@ -330,7 +341,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
 
             if self.in_subregion(bit_offset, int(decl.size())):
                 raise RegionDeclarationError('subregion declaration overwrites another subregion')
-
+        
         self.subregions[id(decl)] = decl
         self.subregion_offsets[id(decl)] = bit_offset
 
@@ -473,18 +484,27 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
         shrink = self.get_arg('shrink')
         ranges = dict()
         nodes = self.current_offsets.in_order_traversal()
-
+        print 'nodes', list(self.current_offsets.in_order_traversal()), self.subregions
+        print self.reverse_offsets
+        
         index = 0
 
         for i in xrange(len(self.current_offsets)):
             index = i
             node = nodes.next()
             ranges[i] = (node.label, node.label+int(node.size(self.subregions)))
+
+            if index > 0:
+                print 'im so dumb today', index, ranges[index-1][0], ranges[index-1][1], decl_offset
             
             if not include and index > 0 and ranges[index-1][0] == decl_offset:
+                print 'found not inclusive'
                 break
             elif include and ranges[index][0] == decl_offset:
+                print 'found inclusive'
                 break
+
+        print 'pushing', decl, len(self.current_offsets), index
 
         if not include and index == len(self.current_offsets)-1:
             return
@@ -496,6 +516,8 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
             index += 1
         else:
             new_ranges = {index-1: (ranges[index-1][0], ranges[index-1][1]+delta)}
+
+        print 'push'
             
         while index < len(self.current_offsets):
             if index == 0:
@@ -524,7 +546,7 @@ class RegionDeclaration(Declaration): # BASE_CLASS set to Region after Region de
                 break
 
             index += 1
-
+        
         while len(move_ops):
             op = move_ops.pop()
             decl, offset = op
@@ -912,7 +934,8 @@ class NumericRegion(Region):
         kwargs['link_data'] = map(lambda x: x.get_value(force), self.link_iterator())
         dict_merge(kwargs, self.declaration.args)
         
-        return self.static_value(**kwargs)
+        value = self.static_value(**kwargs)
+        return value
 
     def __int__(self):
         return self.get_value()

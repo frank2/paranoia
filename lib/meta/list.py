@@ -161,6 +161,18 @@ class List(Region):
         
         super(List, self).__init__(**kwargs)
 
+        self.resolve_hints()
+
+    def resolve_hints(self):
+        for i in xrange(len(self.declarations)):
+            decl = self.declarations[i]
+
+            if isinstance(decl, SizeHintDeclaration):
+                hint_instance = self.instantiate(i)
+                hint_instance.resolve()
+            elif isinstance(decl, ListDeclaration):
+                list_instance = self.instantiate(i)
+
     def parse_bit_data(self, bit_data):
         total_parsed = 0
 

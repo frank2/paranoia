@@ -64,7 +64,7 @@ class ArrayDeclaration(RegionDeclaration):
     def set_elements(self, elements):
         elem_arg = self.get_arg('elements')
         
-        if elements == elem_arg and not Force:
+        if elements == elem_arg:
             return
 
         self.set_arg('elements', elements)
@@ -80,7 +80,7 @@ class ArrayDeclaration(RegionDeclaration):
         new_size = self.aligned_offset(elements)
 
         if not alignment == 0:
-            new_size -= alignment_delta(base_size, alignment)
+            new_size -= alignment_delta(int(base_size), alignment)
         
         if elements < elem_arg and not self.current_offsets.is_empty():
             filter_key = self.aligned_offset(index)
@@ -105,7 +105,8 @@ class ArrayDeclaration(RegionDeclaration):
                 del self.declaration_index[kill]
                 self.remove_subregion(kill_decl)
 
-        self.set_size(new_size)
+        size_obj = Size(bits=new_size)
+        self.set_size(size_obj)
 
     def aligned_offset(self, index):
         base_decl = self.get_arg('base_declaration')
@@ -119,7 +120,7 @@ class ArrayDeclaration(RegionDeclaration):
 
     def declare_index(self, index):
         if index in self.declaration_index:
-            return self.declaration_index[index]
+            return self.subregions[self.declaration_index[index]]
 
         base_decl = self.get_arg('base_declaration')
 

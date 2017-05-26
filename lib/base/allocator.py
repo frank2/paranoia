@@ -191,7 +191,7 @@ class Allocation(ParanoiaAgent):
             
             for block_id in affected_blocks:
                 block = self.blocks[block_id]
-                value = data_read[block_id]
+                value = data_read[block_id-offset]
 
                 if isinstance(value, int):
                     block.value = value
@@ -375,6 +375,9 @@ class Allocation(ParanoiaAgent):
             index += self.size
 
         self.set_block(self.id + index, block_value)
+
+    def __repr__(self):
+        return '<%s:%X/%d>' % (self.__class__.__name__, self.id, self.size)
 
     def __del__(self):
         if self.id in self.allocator.allocations:
@@ -717,34 +720,45 @@ class VirtualAddress(Address):
             del self.allocation.addresses[self.offset]
 
         self.allocation = self.allocator.allocate(self.offset, size)
+        self.offset = 0
         self.allocation.addresses[self.offset] = self
 
     def ensure_allocation(self, offset=None, size=None):
         if offset is None:
-            offset = self.offset
+            target_offset = self.offset
         else:
-            offset = self.offset+offset
+            target_offset = self.offset+offset
             
         if size is None:
             if not self.allocation is None:
-                size = self.allocation.size - offset
+                size = self.allocation.size - target_offset
             elif not self.allocator is None:
-                size = self.allocator.maximum_offset - offset
+                size = self.allocator.maximum_offset - target_offset
             else:
                 raise VirtualAddressError('allocator and allocation cannot be None')
 
         if self.allocation is None:
-            offset_address = self.allocator.offset_address(offset)
-            self.allocation = self.allocator.find(offset_address)
+            offset_address = self.allocator.offset_address(self.offset)
+            self.allocation = self.allocator.find(offset_address, True)
 
             if self.allocation is None:
                 self.reverse_allocate(size)
+                target_offset = 0 if offset is None else offset
+                prior_alloc = 0
             else:
-                offset = offset_address - self.allocation.id
-                self.offset = offset - self.offset
-            
-        if offset+size >= self.allocation.size:
-            self.allocation.reallocate(offset+size)
+                # convert the offset from its root allocation to its relative
+                # offset at the found allocation
+                allocation_delta = self.allocation.id - self.allocator.base_address
+                self.offset -= allocation_delta
+                target_offset -= allocation_delta
+                
+                self.allocation.addresses[self.offset] = self
+                prior_alloc = self.allocation.size
+        else:
+            prior_alloc = self.allocation.size
+        
+        if target_offset+size > prior_alloc:
+            self.allocation.reallocate(target_offset+size)
 
     def valid(self, inclusive=False):
         if not self.allocation is None:
@@ -1041,12 +1055,12 @@ class VirtualAllocator(Allocator):
     def reallocate(self, address, size):
         if not address in self.allocations:
             raise AllocatorError('address was not allocated by allocator')
-
+            
         end_address = address+size
         backing_alloc = self.backing_allocations[address]
         backing_alloc.reallocate(size)
 
-        allocation = self.allocations[address]
+        allocation = self.allocations[address].value
         allocation.size = size
         end_address = address+size
 

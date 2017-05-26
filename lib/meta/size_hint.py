@@ -62,7 +62,7 @@ class SizeHintDeclaration(RegionDeclaration):
         elif action == 'set_elements':
             if not isinstance(decl, ArrayDeclaration):
                 raise SizeHintError('declaration not an ArrayDeclaration')
-            
+
             decl.set_elements(value)
         elif isinstance(action, str):
             decl.set_arg(action, value)

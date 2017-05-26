@@ -1,18 +1,76 @@
 #!/usr/bin/env python
 
+import ctypes
 import os
 
+from paranoia.fundamentals import memmove
 from paranoia.base.allocator import allocators, VirtualAllocator, VirtualAllocation, VirtualAddress
 from paranoia.base.paranoia_agent import ParanoiaAgent, ParanoiaError
 from paranoia.base.size import Size
 
 __all__ = ['DiskError', 'DiskAddress', 'DiskAllocation', 'DiskAllocator', 'DiskManager'
            ,'DiskHandle', 'manager', 'disk_handle']
+
+try:
+    import __builtin__
+except ImportError: #python3
+    import builtins as __builtin__
            
 class DiskError(ParanoiaError):
     pass
 
 class DiskAddress(VirtualAddress):
+    def ensure_allocation(self, offset=None, size=None):
+        if offset is None:
+            target_offset = self.offset
+        else:
+            target_offset = self.offset+offset
+            
+        if size is None:
+            if not self.allocation is None:
+                size = self.allocation.size - target_offset
+            elif not self.allocator is None:
+                size = self.allocator.maximum_offset - target_offset
+            else:
+                raise VirtualAddressError('allocator and allocation cannot be None')
+
+        if self.allocation is None:
+            offset_address = self.allocator.offset_address(self.offset)
+            self.allocation = self.allocator.find(offset_address, True)
+
+            if self.allocation is None:
+                self.reverse_allocate(size)
+                target_offset = 0 if offset is None else offset
+                prior_alloc = 0
+            else:
+                # convert the offset from its root allocation to its relative
+                # offset at the found allocation
+                allocation_delta = self.allocation.id - self.allocator.base_address
+                self.offset -= allocation_delta
+                target_offset -= allocation_delta
+
+                self.allocation.addresses[self.offset] = self
+                prior_alloc = self.allocation.size
+        else:
+            prior_alloc = self.allocation.size
+        
+        if target_offset+size > prior_alloc:
+            self.allocation.reallocate(target_offset+size)
+
+            curr = self.allocator.handle.tell()
+            file_offset = self.allocation.id + target_offset - self.allocator.base_address
+
+            if file_offset+size <= self.allocator.handle.eof():
+                self.allocator.handle.seek(file_offset)
+                self.allocator.handle.read_address(size)
+                self.allocator.handle.seek(curr)
+            elif self.allocator.handle.writable():
+                self.allocator.handle.seek(file_offset)
+                self.allocator.handle.read_address()
+                self.allocator.handle.seek(curr)
+            else:
+                raise DiskError('address plus offset exceeds disk handle while handle is not writable')
+
     def mirror(self, offset, data):
         if self.allocator.handle.closed() or not self.allocator.handle.writable():
             return
@@ -111,22 +169,26 @@ class DiskAllocation(VirtualAllocation):
         alloc_offset = id_val - self.id
 
         if alloc_offset+1 > self.size: # buffer not large enough
-            if self.allocator.handle.closed() or not self.allocator.handle.writable():
-                raise DiskError('write exceeds file boundary while file is unwritable')
+            if self.allocator.handle.closed():
+                raise DiskError('write exceeds boundary while file is closed')
+            elif file_offset+1 > self.allocator.handle.eof() and not self.allocator.handle.writable():
+                raise DiskError('write exceeds end of file while file is not writable')
             
             self.allocator.maximum_offset = file_offset+1
             self.reallocate(alloc_offset+1)
             handle = self.allocator.handle
-            curr = handle.tell()
-            handle.seek(file_offset, os.SEEK_SET)
-            pos = self.dataref.tell()
 
-            if not pos == file_offset:
-                zero_delta = file_offset - pos
-                self.handle.write('\x00' * zero_delta, False)
+            if handle.writable():
+                curr = handle.tell()
+                handle.seek(file_offset, os.SEEK_SET)
+                pos = self.dataref.tell()
+
+                if not pos == file_offset:
+                    zero_delta = file_offset - pos
+                    self.handle.write('\x00' * zero_delta, False)
                 
-            handle.write(chr(byte_val), False)
-            handle.seek(curr, os.SEEK_SET)
+                handle.write(chr(byte_val), False)
+                handle.seek(curr, os.SEEK_SET)
 
         self.allocator.check_range(id_val)
 
@@ -181,24 +243,28 @@ class DiskAllocation(VirtualAllocation):
         alloc_offset = id_val - self.id
         file_offset = id_val - self.allocator.base_address
         size = len(string)
-        
+
         if alloc_offset+size > self.size: # buffer too small
-            if self.allocator.handle.closed() or not self.allocator.handle.writable():
-                raise DiskError('write exceeds file boundary while file is unwritable')
+            if self.allocator.handle.closed():
+                raise DiskError('write exceeds boundary while file is closed')
+            elif file_offset+size > self.allocator.handle.eof() and not self.allocator.handle.writable():
+                raise DiskError('write exceeds end of file while file is not writable')
             
             handle = self.allocator.handle
             self.allocator.maximum_offset = file_offset+len(string)
             self.reallocate(alloc_offset+size)
-            curr = handle.tell()
-            handle.seek(file_offset, os.SEEK_SET)
-            pos = handle.tell()
 
-            if not pos == file_offset:
-                zero_delta = file_offset - pos
-                handle.write('\x00' * zero_delta, False)
+            if handle.writable():
+                curr = handle.tell()
+                handle.seek(file_offset, os.SEEK_SET)
+                pos = handle.tell()
+
+                if not pos == file_offset:
+                    zero_delta = file_offset - pos
+                    handle.write('\x00' * zero_delta, False)
                 
-            handle.write(string, False)
-            handle.seek(curr, os.SEEK_SET)
+                handle.write(string, False)
+                handle.seek(curr, os.SEEK_SET)
 
         self.allocator.check_range(id_val)
 
@@ -411,7 +477,7 @@ class DiskManager(ParanoiaAgent):
         if end_offset > allocation.size:
             allocation.reallocate(end_offset)
 
-        allocation.write_string(allocation.id+allocation_offset, data)
+        allocation.write_bytestring(allocation.id+allocation_offset, bytearray(map(ord, data)))
 
         return (allocation.address(allocation_offset), size)
 
